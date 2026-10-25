@@ -150,13 +150,19 @@ async function handle(text) {
   } else if (m.t === 'bat' && m.re === asked) {
     asked = 0;
     answeredAt = m.at || Date.now();
-    now = { ...m.now, at: answeredAt };
-    history = Array.isArray(m.h) ? m.h.filter((r) => typeof r.at === 'number') : [];
+    now = settle({ ...m.now, at: answeredAt });
+    history = Array.isArray(m.h) ? m.h.filter((r) => typeof r.at === 'number').map(settle) : [];
     render();
   }
 }
 
 // ---- what the readings say ---------------------------------------------------------------------------
+
+// Meta's toolkit reports the glasses at 0% with charging unknown until the link settles: that is "not known yet",
+// not an empty battery (it drew a drop to 0% on the real phone's chart, 2026-10-25 18:55).
+function settle(r) {
+  return r.g === 0 && r.gc !== 'CHARGING' && r.gc !== 'NOT_CHARGING' ? { ...r, g: -1 } : r;
+}
 
 const PLACES = {
   notworn: 'Not worn',
@@ -266,7 +272,6 @@ function render() {
     : '';
   renderChart(inWindow, windowMs);
   $('span').textContent = span === 'day' ? 'Last 24 hours' : 'Last 7 days';
-  $('since').textContent = span === 'day' ? '24 h ago' : '7 days ago';
   $('span').setAttribute('aria-label', span === 'day' ? 'Showing the last 24 hours. Press for 7 days' : 'Showing the last 7 days. Press for 24 hours');
 
   // The top line: where the numbers come from, and how fresh they are.
@@ -275,6 +280,7 @@ function render() {
     : waiting ? (answeredAt ? `Your phone is not answering · from ${clock(answeredAt)}` : 'Your phone is not answering')
     : answeredAt ? `From your phone · ${clock(answeredAt)}` : 'Asking your phone…';
   $('state').classList.toggle('warn', !!waiting);
+  $('main').classList.toggle('stale', !!waiting || (!linkUp() && !!answeredAt));
 }
 
 function level(el, value, charging) {
@@ -319,14 +325,22 @@ function renderUses(list, rates) {
 function renderChart(readings, windowMs) {
   const svg = $('chart');
   const w = 540;
-  const h = 84;
-  const t0 = Date.now() - windowMs;
-  const line = (field) => readings
-    .filter((r) => r[field] != null && r[field] >= 0)
-    .map((r) => `${(((r.at - t0) / windowMs) * w).toFixed(1)},${(h - (r[field] / 100) * h).toFixed(1)}`)
-    .join(' ');
-  $('lineGlasses').setAttribute('points', line('g'));
-  $('lineBand').setAttribute('points', line('b'));
+  const h = 96;
+  const end = Date.now();
+  // The axis starts at the first reading when there is less than the whole span, so a short history fills it.
+  const first = readings.length ? readings[0].at : end - windowMs;
+  const t0 = Math.max(end - windowMs, Math.min(first, end - 30 * 60000));
+  const xOf = (at) => (((at - t0) / (end - t0)) * w).toFixed(1);
+  const yOf = (v) => (h - (v / 100) * (h - 2) - 1).toFixed(1);
+  const line = (field, current) => {
+    const pts = readings.filter((r) => r[field] != null && r[field] >= 0 && r.at >= t0).map((r) => [r.at, r[field]]);
+    if (current != null && current >= 0) pts.push([end, current]); // carried to now, at the level shown above
+    if (pts.length === 1) pts.unshift([Math.max(t0, pts[0][0] - 60000), pts[0][1]]); // a single reading: a short tick
+    return pts.map(([at, v]) => `${xOf(at)},${yOf(v)}`).join(' ');
+  };
+  $('lineGlasses').setAttribute('points', line('g', now ? now.g : null));
+  $('lineBand').setAttribute('points', line('b', now ? now.b : null));
+  $('since').textContent = readings.length && t0 > end - windowMs ? clock(t0) : (span === 'day' ? '24 h ago' : '7 days ago');
   svg.setAttribute('aria-label', `Battery levels over the ${span === 'day' ? 'last 24 hours' : 'last 7 days'}`);
 }
 

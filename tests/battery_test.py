@@ -126,6 +126,7 @@ with sync_playwright() as p:
     now_ms = pg.evaluate("Date.now()")
     hist = day_of_readings(now_ms)
     last = hist[-1]
+    hist.append({"at": now_ms - 60000, "g": 0, "gc": "", "w": "DONNED", "c": True, "b": last["b"], "a": "", "m": False})  # toolkit not settled
     answer({"g": last["g"], "gc": "NOT_CHARGING", "w": "DONNED", "c": True, "b": last["b"]}, hist)
     view = pg.evaluate("""() => ({
         g: document.querySelector('#glasses .pct').textContent, b: document.querySelector('#band .pct').textContent,
@@ -137,8 +138,9 @@ with sync_playwright() as p:
         state: document.getElementById('stateText').textContent })""")
     ok4 = (view["g"] == f"{last['g']}%" and view["b"] == f"{last['b']}%" and "left" in view["left"]
            and view["rows"] and view["rows"][0].startswith("Worn, Quran listening") and view["gPoints"] > 50 and view["bPoints"] > 50
-           and view["state"].startswith("From your phone"))
-    check("4 the answer draws both levels, time left, what uses it (highest first) and both lines", ok4, json.dumps(view)[:400])
+           and view["state"].startswith("From your phone")
+           and pg.evaluate("Math.max(...document.getElementById('lineGlasses').getAttribute('points').split(' ').map((p) => +p.split(',')[1]))") < 90)
+    check("4 the answer draws both levels, time left, what uses it (highest first) and both lines, never a 0% that was only unknown", ok4, json.dumps(view)[:400])
     shot(pg, "2-day")
 
     # 5. low and charging
@@ -155,7 +157,8 @@ with sync_playwright() as p:
     pg.wait_for_timeout(100)
     pg.evaluate("asked = Date.now() - 13000; render()")
     warn = pg.evaluate("[document.getElementById('stateText').textContent, document.getElementById('state').classList.contains('warn')]")
-    check("6 no answer for 12 s: the phone is not answering, in the warning look", warn[0].startswith("Your phone is not answering") and warn[1], warn)
+    warn.append(pg.evaluate("[document.getElementById('main').classList.contains('stale'), getComputedStyle(document.querySelector('.levels')).opacity]"))
+    check("6 no answer for 12 s: the phone is not answering, in the warning look, and the last word dims", warn[0].startswith("Your phone is not answering") and warn[1] and warn[2][0] and float(warn[2][1]) < 1, warn)
     shot(pg, "5-not-answering")
 
     # 7. span
