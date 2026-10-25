@@ -1,0 +1,105 @@
+/* Battery on Meta Ray-Ban Display.
+   The display is additive: black adds no light and reads as see-through, so the page stays black and only type,
+   the two level bars, the chart's lines and the focus glow are lit. Nothing moves on its own.
+   Colour roles: green means charging; amber is a low level only (20% or less, not charging); the green ring with
+   its glow means focus and nothing else. The band's line is dashed so the two lines never rely on colour alone. */
+:root {
+  --ink: #ffffff;
+  --soft: #d5dbe2;
+  --dim: #98a3ae;
+  --hair: rgba(255, 255, 255, 0.34);
+  --accent: #7fe3a0;
+  --low: #ffb08a;
+  --glow: 0 0 0 3px var(--accent), 0 0 16px rgba(127, 227, 160, 0.5);
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  background: #000;
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+main { block-size: 100%; }
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  block-size: 100%;
+  padding: 24px 30px 22px;
+  overflow: hidden;
+}
+.screen.center { justify-content: center; }
+
+h1 { margin: 0; font-size: 34px; font-weight: 600; }
+h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); letter-spacing: 0.02em; }
+.say { margin: 0; font-size: 22px; }
+.hint { margin: 0; font-size: 17px; color: var(--dim); line-height: 1.35; }
+
+/* ---- top line ------------------------------------------------------------------------------------ */
+.topline { display: flex; align-items: center; min-block-size: 22px; font-size: 15px; color: var(--dim); }
+.state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.state.warn { color: var(--low); font-weight: 600; }
+
+/* ---- the two levels ------------------------------------------------------------------------------- */
+.levels { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
+.level { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 12px; row-gap: 6px; }
+.level .name { font-size: 17px; color: var(--soft); }
+.level .pct { font-size: 52px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; justify-self: end; }
+.level .bar { grid-column: 1 / -1; block-size: 6px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--hair); overflow: hidden; }
+.level .fill { display: block; block-size: 100%; inline-size: 0; background: var(--soft); }
+.level .note { grid-column: 1 / -1; min-block-size: 20px; font-size: 15px; color: var(--dim); }
+.level.charging .fill { background: var(--accent); }
+.level.charging .note { color: var(--accent); }
+.level.low .pct, .level.low .note { color: var(--low); }
+.level.low .fill { background: var(--low); }
+
+.left { margin: 0; font-size: 18px; color: var(--soft); min-block-size: 24px; }
+
+/* ---- what uses it --------------------------------------------------------------------------------- */
+.uses { flex: 1; min-block-size: 0; overflow: hidden; }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.list li { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; font-size: 16px; line-height: 1.25; }
+.list .what { color: var(--soft); }
+.list .rate { font-weight: 600; font-variant-numeric: tabular-nums; justify-self: end; white-space: nowrap; }
+.list .over { grid-column: 1 / -1; font-size: 13px; color: var(--dim); }
+.list .empty { display: block; color: var(--dim); }
+
+/* ---- chart and the one control ----------------------------------------------------------------------- */
+.foot { display: grid; gap: 8px; }
+.chart { inline-size: 100%; block-size: 70px; }
+.chart .axis { stroke: var(--hair); stroke-width: 1; }
+.chart .line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.chart .line.glasses { stroke: var(--ink); }
+.chart .line.band { stroke: var(--dim); stroke-dasharray: 5 4; }
+.chartlabels { display: flex; justify-content: space-between; margin-block-start: -4px; font-size: 12px; color: var(--dim); }
+.footrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.key { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--dim); }
+.sw { display: inline-block; inline-size: 18px; block-size: 0; border-block-start: 2px solid var(--ink); }
+.sw.band { border-block-start: 2px dashed var(--dim); margin-inline-start: 6px; }
+
+button {
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: transparent;
+  border: 1.5px solid var(--hair);
+  border-radius: 999px;
+  padding: 8px 16px;
+  outline: none;
+}
+button:focus-visible, button:focus { box-shadow: var(--glow); border-color: transparent; }
+
+/* ---- calm: less light while nobody is touching it ----------------------------------------------------------
+   After 15 s without input the details and outlines dim; the two levels and a low level never dim, and the
+   focus ring stays the brightest ring on screen. The first input wakes it. */
+body.calm .uses, body.calm .left, body.calm .topline, body.calm .chart, body.calm .chartlabels, body.calm .key { opacity: 0.55; }
+body.calm button { border-color: rgba(255, 255, 255, 0.16); color: var(--dim); }
+body.calm .level:not(.low) .fill { opacity: 0.6; }

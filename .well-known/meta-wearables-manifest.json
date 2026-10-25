@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "Battery",
+  "description": "The glasses' and the band's battery, and what uses it, from readings your phone keeps.",
+  "appearance": {
+    "theme_color": "#7FE3A0",
+    "icon_background": {
+      "colors": ["#1E5A34", "#06170D"],
+      "stops": [0.0, 1.0],
+      "inner_glow_color": "#A8F5C2"
+    },
+    "icon": {
+      "src": "../icon-mono.svg",
+      "type": "monochrome"
+    }
+  }
+}

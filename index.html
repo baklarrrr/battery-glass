@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="application-name" content="Battery">
+  <meta name="description" content="Battery shows the glasses' and the band's battery and what uses it, from readings the Tidal Glass phone app keeps. When acting for the wearer, say the two levels in one short sentence.">
+  <meta name="mrbd-web-app-capable" content="yes">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#000000">
+  <title>Battery</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <section id="unpaired" class="screen center" hidden>
+      <h1>Battery</h1>
+      <p class="say">Not linked to your phone yet.</p>
+      <p class="hint">It is added from the Tidal Glass app on your phone, which links it.</p>
+    </section>
+
+    <section id="main" class="screen" aria-label="Battery" hidden>
+      <header class="topline">
+        <span id="state" class="state"><span id="stateText">Connecting to your phone…</span></span>
+      </header>
+
+      <div class="levels">
+        <div id="glasses" class="level">
+          <span class="name">Glasses</span>
+          <span class="pct">—</span>
+          <span class="bar" aria-hidden="true"><span class="fill"></span></span>
+          <span id="glassesNote" class="note"></span>
+        </div>
+        <div id="band" class="level">
+          <span class="name">Band</span>
+          <span class="pct">—</span>
+          <span class="bar" aria-hidden="true"><span class="fill"></span></span>
+          <span id="bandNote" class="note"></span>
+        </div>
+      </div>
+
+      <p id="left" class="left"></p>
+
+      <div class="uses">
+        <h2>What uses the glasses</h2>
+        <ul id="usesGlasses" class="list"></ul>
+      </div>
+
+      <footer class="foot">
+        <svg id="chart" class="chart" viewBox="0 0 540 84" preserveAspectRatio="none" role="img" aria-label="Battery levels over the last 24 hours">
+          <line x1="0" y1="83.5" x2="540" y2="83.5" class="axis"/>
+          <polyline id="lineBand" class="line band" points=""/>
+          <polyline id="lineGlasses" class="line glasses" points=""/>
+        </svg>
+        <div class="chartlabels" aria-hidden="true"><span id="since">24 h ago</span><span>now</span></div>
+        <div class="footrow">
+          <button id="span" type="button">Last 24 hours</button>
+          <span class="key"><span class="sw glasses"></span>Glasses <span class="sw band"></span>Band</span>
+        </div>
+      </footer>
+    </section>
+  </main>
+  <script src="vendor/mqtt.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
