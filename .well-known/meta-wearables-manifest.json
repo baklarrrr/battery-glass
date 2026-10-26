@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "Battery",
-  "description": "The glasses' and the band's battery, and what uses it, from readings your phone keeps.",
+  "description": "The glasses' and the band's battery, and how fast they drain, from readings your phone keeps.",
   "appearance": {
     "theme_color": "#7FE3A0",
     "icon_background": {

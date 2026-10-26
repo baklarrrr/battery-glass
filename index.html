@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="application-name" content="Battery">
-  <meta name="description" content="Battery shows the glasses' and the band's battery and what uses it, from readings the Tidal Glass phone app keeps. When acting for the wearer, say the two levels in one short sentence.">
+  <meta name="description" content="Battery shows the glasses' and the band's battery and how fast they drain, from readings the Tidal Glass phone app keeps.">
   <meta name="mrbd-web-app-capable" content="yes">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#000000">
@@ -17,7 +17,7 @@
     <section id="unpaired" class="screen center" hidden>
       <h1>Battery</h1>
       <p class="say">Not linked to your phone yet.</p>
-      <p class="hint">It is added from the Tidal Glass app on your phone, which links it.</p>
+      <p class="hint">On your phone, open the Tidal Glass app and tap “Put Battery on my glasses”.</p>
     </section>
 
     <section id="main" class="screen" aria-label="Battery" hidden>
@@ -43,16 +43,17 @@
       <p id="left" class="left"></p>
 
       <div class="uses">
-        <h2>What uses the glasses</h2>
+        <h2>How fast they drain</h2>
         <ul id="usesGlasses" class="list"></ul>
+        <p id="notCounted" class="aside" hidden>Not counted: Meta's apps, brightness, and Quran Glass outside Follow my voice.</p>
       </div>
 
       <footer class="foot">
         <svg id="chart" class="chart" viewBox="0 0 540 96" preserveAspectRatio="none" role="img" aria-label="Battery levels over the last 24 hours">
           <line x1="0" y1="48" x2="540" y2="48" class="mid"/>
           <line x1="0" y1="95.5" x2="540" y2="95.5" class="axis"/>
-          <polyline id="lineBand" class="line band" points=""/>
-          <polyline id="lineGlasses" class="line glasses" points=""/>
+          <path id="lineBand" class="line band" d=""/>
+          <path id="lineGlasses" class="line glasses" d=""/>
         </svg>
         <div class="chartlabels" aria-hidden="true"><span id="since">24 h ago</span><span>now</span></div>
         <div class="footrow">
