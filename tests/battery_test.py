@@ -519,6 +519,12 @@ with sync_playwright() as p:
               and pts and pts[0][0] < 5)
         check("T3 a 7-day answer cut at 1,500 readings is labelled from its oldest reading, with the day, and fills the chart",
               bool(ok), [v["since"], pts[:1]])
+        # No older readings can be had, so the next request asks only for newer ones (not the whole week again).
+        pg.evaluate("window.__clients.forEach((c) => { c.sent.length = 0; }); ask()")
+        pg.wait_for_timeout(200)
+        req = pg.evaluate("async () => openMessage(window.__clients[0].sent[window.__clients[0].sent.length - 1])")
+        check("D9 after a 7-day answer cut at 1,500 readings, the next request asks only for newer readings",
+              req.get("since") == big[-1]["at"], req)
         close(pg)
 
     for name, fn in [("B01", case_b01), ("B02", case_b02), ("B03", case_b03), ("B04", case_b04), ("B05", case_b05),
@@ -743,6 +749,22 @@ with sync_playwright() as p:
               v["gPath"].count("M") == 2 and v["bPath"].count("M") == 1, [v["gPath"][:120], v["bPath"][:80]])
         close(pg)
 
+    def case_columns():
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - (594 + 70) * MIN - 10_000, 95.0, band=90.0, band_rate=0.0)
+        s.run(594, 5)                     # worn, nothing of ours, 5 %/h for almost 10 hours
+        s.set(w="DOFFED")
+        s.run(70, 0.3)                    # off the face 70 minutes with no change: "under 1% an hour"
+        answer(pg, now_of(s), s.out)
+        pg.evaluate("span = 'week'; render()")
+        rows = view(pg)["rows"]
+        fit = pg.evaluate("[...document.querySelectorAll('#usesGlasses li > span')].every((el) => el.scrollWidth <= el.clientWidth + 1)")
+        ok = (fit and any(r.startswith("Not worn | over 1 h 10 min | under 1% an hour") for r in rows)
+              and any(re.match(r"Worn, anything else \| over 9 h \d+ min \| 5% an hour", r) for r in rows))
+        check("D4 the longest texts fit their columns (\"over 9 h 50 min\", \"under 1% an hour\")", ok, [fit, rows])
+        close(pg)
+
     def case_views():
         pg = page_at(URL, connect=True)
         s = normal_day(pg.evaluate("Date.now()"))
@@ -766,7 +788,8 @@ with sync_playwright() as p:
 
     for name, fn in [("D7 no link", case_no_link), ("D7 not enough", case_not_enough), ("D normal day", case_normal_day),
                      ("D6 saved and own", case_saved_and_own), ("D10 charging", case_charging), ("D2 low", case_low),
-                     ("D7 band", case_band), ("D3 lost", case_lost), ("D11 gap", case_gap), ("views", case_views),
+                     ("D7 band", case_band), ("D3 lost", case_lost), ("D11 gap", case_gap), ("D4 columns", case_columns),
+                     ("views", case_views),
                      ("D5 files", case_files)]:
         guarded(name, fn)
 

@@ -70,7 +70,7 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
    last two columns have fixed widths so they line up from row to row. */
 .uses { flex: 1; min-block-size: 0; overflow: hidden; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.list li { display: grid; grid-template-columns: minmax(0, 1fr) 118px 136px; align-items: baseline; column-gap: 10px; font-size: 16px; line-height: 1.25; }
+.list li { display: grid; grid-template-columns: minmax(0, 1fr) 112px 150px; align-items: baseline; column-gap: 10px; font-size: 16px; line-height: 1.25; }
 .list .what { color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list .over { font-size: 14px; color: var(--dim); white-space: nowrap; text-align: end; }
 .list .rate { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: end; }

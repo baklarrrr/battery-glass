@@ -57,6 +57,7 @@ let span = 'day';
 let phone = null; // the phone's word on the levels: { g, gc, w, c, b, bt, bw, a, m, p, at, live }
 let history = []; // readings, oldest first
 let heldFrom = 0; // the readings held are complete from this time on (0: none held)
+let heldAll = false; // the last full answer was cut at the most one answer carries: no older readings can be had
 let heard = false; // the phone's readings are held (from an answer or the copy kept on the glasses)
 let answeredAt = 0; // this visit's last answer, by the phone's clock (0: none yet)
 let own = null; // the glasses' own battery, when the browser really knows it: { level: 0-100, charging }
@@ -157,9 +158,10 @@ async function ask() {
   const ts = Date.now();
   const from = ts - WINDOWS[span];
   const newest = history.length ? history[history.length - 1].at : 0;
-  // Once the readings held reach back to the start of the span, only newer ones are asked for, and merged in. The
-  // phone answers with readings at or after `since`, so the newest held comes back once and is dropped.
-  const since = heldFrom && heldFrom <= from && newest >= from ? newest : from;
+  // Once the readings held reach back to the start of the span (or are all one answer can carry), only newer ones are
+  // asked for, and merged in. The phone answers with readings at or after `since`, so the newest held comes back once
+  // and is dropped.
+  const since = (heldAll || (heldFrom && heldFrom <= from)) && newest >= from ? newest : from;
   asked = ts;
   request = { ts, since, incremental: since !== from };
   requestBody = await seal({ c: 'batHistory', ts, since, max: MAX });
@@ -226,6 +228,7 @@ function onAnswer(m) {
     // An answer to a full request holds everything since the request's start, unless it hit the most a message
     // carries; then, or when the request is not known, it holds only from its oldest reading.
     heldFrom = req && !req.incremental && !capped ? req.since : h.length ? h[0].at : answeredAt;
+    heldAll = capped;
   }
   const keepFrom = Date.now() - WINDOWS.week; // a week at most, as on the phone
   if (history.length && history[0].at < keepFrom) {
@@ -250,7 +253,7 @@ function savedKey() {
 function save() {
   try {
     const { live, at, ...now } = phone || {};
-    localStorage.setItem(savedKey(), JSON.stringify({ at: answeredAt, now, h: history, heldFrom }));
+    localStorage.setItem(savedKey(), JSON.stringify({ at: answeredAt, now, h: history, heldFrom, heldAll }));
   } catch (e) { /* full or off: the next answer tries again */ }
 }
 
@@ -261,6 +264,7 @@ function loadSaved() {
     phone = { ...settle(s.now && typeof s.now === 'object' ? s.now : {}), at: s.at, live: false };
     history = s.h.filter((r) => r && typeof r.at === 'number').map(settle);
     heldFrom = typeof s.heldFrom === 'number' ? s.heldFrom : 0;
+    heldAll = s.heldAll === true;
     heard = true;
     version++;
   } catch (e) { /* nothing usable kept */ }
@@ -550,12 +554,16 @@ function roundTime(ms) {
   return d.getTime();
 }
 
+// How long a rate was measured over, short enough for its column: minutes within 10 hours, then hours, then days.
 function duration(hours) {
   const mins = Math.round(hours * 60);
   if (mins < 60) return `${mins} min`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m ? `${h} h ${m} min` : `${h} h`;
+  if (mins < 600) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
+  return hours < 47.5 ? `${Math.round(hours)} h` : `${Math.round(hours / 24)} days`;
 }
 
 function ago(ms) {

@@ -42,8 +42,8 @@ retained) is shown with its time and never replaces what the phone said on this 
   unknown or disconnected readings). The phone writes a line only on a change, so a long quiet stretch stays joined.
 
 Not counted, because the phone cannot see them: Meta's own apps, the display's brightness, the radios, Quran Glass
-outside Follow my voice, and Bakar Studio or Bakar Home being open (they talk to the PC, not the phone). The page says
-the first three in one dim line under the list.
+outside Follow my voice, and Bakar Studio or Bakar Home being open (they talk to the PC, not the phone). One dim line
+under the list names Meta's apps, brightness and Quran Glass outside Follow my voice.
 
 ## Privacy
 
