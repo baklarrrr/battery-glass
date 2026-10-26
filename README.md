@@ -29,15 +29,24 @@ retained) is shown with its time and never replaces what the phone said on this 
   that was off). This assumes the toolkit reports every whole percent, which is not yet checked on the real glasses.
 - **How fast they drain** lists a situation only when the time between two changes stayed in that one situation, with
   at least 3 points over 30 minutes; rates are whole numbers. A situation with no fall at all over h hours says
-  "under X% an hour" (X = 1/h, rounded up), never 0. The band's note follows the same rule, timed by when the band was
-  read, so a band the phone has stopped reading adds no hours.
+  "under X% an hour" (X = 1/h, rounded up), never 0. A span that ends in a jump or a step the wrong way never counts
+  as no fall: the level moved where the phone could not see it. (A gap of over 6 hours with no jump still counts the
+  span before it.) The band's note follows the same rules, timed by when the band was read, so a band the phone has
+  stopped reading adds no hours.
 - **Situations:** Not worn; Follow my voice (the glasses' microphone on; Quran Glass's own commands come only then);
   Tidal Glass open; Sound Lab open; Music playing; Worn, anything else.
-- **When to charge** is said as clock times ("20% around 9:30 PM · empty around 11:30 PM"), from the current stretch
-  off the charger: it starts after the last reading that was charging, unknown or disconnected, and needs 3 changes
-  of the level. Until then, today's rate for what is going on now is used, and the line says so ("if Tidal Glass stays
-  open"). Times are rounded to 5 minutes within the hour, 15 within 3 hours, 30 beyond. While charging: "Full around
-  …" from this charge's own readings, or nothing.
+- **When to charge** is said as clock times, from the current stretch off the charger (it starts after the last
+  reading that was charging, unknown or disconnected, or where the readings break: a jump, a rise, or 6 hours with no
+  reading), and the line says which pace it uses:
+  - 3 or more changes of the level in the last 30 minutes: the pace now, "At this pace: 20% around 9:30 PM · empty
+    around 11:30 PM" (the empty time only when it needs no day name, so the line stays on one line);
+  - fewer (a slow drain, such as off the face): the pace over the whole stretch, with 3 changes at least, "At the pace
+    since unplugging: 20% around 5:30 AM", or "since 6:45 PM" when the stretch did not start at the charger (the
+    phone lost the glasses, or saw a jump);
+  - until then, today's rate for what is going on now, "20% around 9:30 PM if Tidal Glass stays open".
+
+  Times are rounded to 5 minutes within the hour, 15 within 3 hours, 30 beyond. While charging: "Full around …" from
+  this charge's own readings, or nothing.
 - **The chart** breaks where the readings stop being continuous (a jump of more than 2 points, or over 30 minutes of
   unknown or disconnected readings). The phone writes a line only on a change, so a long quiet stretch stays joined.
 
@@ -55,6 +64,8 @@ stays in this app's own storage there.
 ## Checks
 
 `python -m http.server 47641 --bind 127.0.0.1 --directory webapp`, then
-`python webapp/tests/battery_test.py [base_url] [shots_dir]`. The test fakes the brokers and the glasses' own battery,
-blocks service workers (a controlled page would load the real MQTT library), and plays the phone, so no message
-leaves the PC. It includes the Director's harness cases (B01-B05, T1-T3), which fail on 78e18cc.
+`python webapp/tests/battery_test.py [base_url] [shots_dir]` (set `BATTERY_TEST_VERBOSE=1` to print what each check
+saw). The test fakes the brokers and the glasses' own battery, blocks service workers (a controlled page would load the
+real MQTT library), and plays the phone, so no message leaves the PC. It includes the Director's harness cases
+(B01-B05, T1-T3), which fail on 78e18cc, and the first rechecks' cases (Director N11, N11r, N13; Photographer A-C),
+which fail on bccfc7c. Captures are drawn with greyscale text (`--disable-lcd-text`), as on the glasses.

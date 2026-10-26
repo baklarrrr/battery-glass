@@ -4,15 +4,26 @@ service worker controls would fetch the real MQTT library and reach the real bro
 
 Serves nothing itself: start `python -m http.server 47641 --bind 127.0.0.1 --directory webapp` first.
   python webapp/tests/battery_test.py [base_url] [shots_dir]
+Set BATTERY_TEST_VERBOSE=1 to print what each check saw, passes included.
 
 1-8   The first build's checks. Where the Director's review (W:\\Code\\GlassesProgram\\reviews\\battery-glass-v1\\
       director\\NOTES.md) changed wording or structure on purpose, the check says so.
 B, T  The Director's harness cases (director\\scripts\\director_harness.py, its Sim class copied below), as checks
       that fail on 78e18cc.
 D     The rest of the Director's must-fix items 1-7 and should-fix items 9-11 for the page.
+N, A  The Director's recheck 1 (reviews\\battery-glass-v1\\recheck-1\\director\\NOTES.md): N11, N11r and N13 from
+      its harness (scripts\\recheck_harness.py, same readings), and checks for must-fix A (the time left follows
+      the pace now, and says which pace) and B (no "under X% an hour" from a span that ended in a jump). N11, N11r,
+      both N13 checks and the two "since …" checks fail on bccfc7c; the 6-hour gap, line-fit and never-wraps checks
+      are guards that pass on both.
+P     The Photographer's recheck 1 (recheck-1\\photographer\\NOTES.md), must-fix A-C: the warning keeps its strength
+      in calm, each bar runs its whole column, and "Read 3 h ago" stays bright. These fail on bccfc7c; the second
+      P-C check (the Photographer's S05 side effect) is a guard that passes on both.
+Text is drawn in greyscale (--disable-lcd-text), as the glasses draw it, so the captures carry no colour fringes.
 """
 import json
 import math
+import os
 import re
 import sys
 import urllib.request
@@ -59,6 +70,16 @@ FAKE_BATTERY = """
   Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { return Promise.resolve(b); } });
 })();
 """
+# How strongly an element is drawn: its opacity times every ancestor's (as the reviewers measured it).
+EFF = """
+window.__eff = (el) => {
+  if (typeof el === 'string') el = document.querySelector(el);
+  let o = 1;
+  for (let e = el; e && e.nodeType === 1; e = e.parentElement) o *= parseFloat(getComputedStyle(e).opacity);
+  return Math.round(o * 1000) / 1000;
+};
+"""
+ONE_LINE = 30  # px: the time-left line is about 24 px tall on one line, about 48 px on two
 
 
 def day_of_readings(now_ms):
@@ -174,10 +195,14 @@ def normal_day(now_ms):
 
 failures = []
 layout = {}
+wraps = []  # every time-left line seen on more than one line
+
+
+VERBOSE = bool(os.environ.get("BATTERY_TEST_VERBOSE"))  # print what each check saw, passes included
 
 
 def check(name, ok, detail=""):
-    print(("PASS " if ok else "FAIL ") + name + (f"  ({str(detail)[:600]})" if detail and not ok else ""))
+    print(("PASS " if ok else "FAIL ") + name + (f"  ({str(detail)[:600]})" if detail and (VERBOSE or not ok) else ""))
     if not ok:
         failures.append(name)
 
@@ -205,6 +230,7 @@ VIEW = """() => {
     band: document.querySelector('#band .pct').textContent, bandCls: document.getElementById('band').className,
     bandNote: t('bandNote'),
     left: t('left'), leftData: { ...document.getElementById('left').dataset },
+    leftH: Math.round(document.getElementById('left').getBoundingClientRect().height),
     rows: [...document.querySelectorAll('#usesGlasses li')].map((li) => (li.children.length ? [...li.children].map((c) => c.textContent).join(' | ') : li.textContent)),
     heading: document.querySelector('.uses h2').textContent,
     notCounted: !!nc && !nc.hidden,
@@ -240,14 +266,20 @@ def clock_minutes(text):
     return [int(m) for m in re.findall(r"\d{1,2}:(\d{2})", text or "")]
 
 
+def true_targets(at_ms, level, rate):
+    """When a level falling at a steady rate (points an hour) reaches 20% and empty."""
+    return at_ms + (level - 20) / rate * HOUR, at_ms + level / rate * HOUR
+
+
 with sync_playwright() as p:
-    browser = p.chromium.launch(channel="chrome", args=["--enable-spatial-navigation"])
+    browser = p.chromium.launch(channel="chrome", args=["--enable-spatial-navigation", "--disable-lcd-text"])
     errors = []
 
     def new_context():
         ctx = browser.new_context(viewport={"width": 600, "height": 600}, service_workers="block", locale="en-US",
                                   timezone_id="America/Toronto")
         ctx.add_init_script(FAKE_BATTERY)
+        ctx.add_init_script(EFF)
         ctx.route("**/vendor/mqtt.min.js", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE_MQTT))
         return ctx
 
@@ -275,7 +307,13 @@ with sync_playwright() as p:
         pg.wait_for_timeout(wait)
 
     def view(pg):
-        return pg.evaluate(VIEW)
+        v = pg.evaluate(VIEW)
+        if v["leftH"] > ONE_LINE:
+            wraps.append([v["left"], v["leftH"]])
+        return v
+
+    def clock_of(pg, ms):
+        return pg.evaluate("(at) => new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })", ms)
 
     def close(pg):
         pg.context.close()
@@ -339,11 +377,13 @@ with sync_playwright() as p:
     pg.wait_for_timeout(100)
     pg.evaluate("asked = Date.now() - 13000; render()")
     warn = pg.evaluate("[document.getElementById('stateText').textContent, document.getElementById('state').classList.contains('warn')]")
-    warn.append(pg.evaluate("[document.getElementById('main').classList.contains('stale'), getComputedStyle(document.getElementById('glasses')).opacity, getComputedStyle(document.getElementById('band')).opacity]"))
+    warn.append(pg.evaluate("[document.getElementById('main').classList.contains('stale'), __eff('#glasses .pct'), __eff('#band .pct')]"))
     # Changed on purpose (Director item 6): each level from the phone dims on its own, so a level the glasses read
-    # themselves can stay bright; the check reads the two levels, not their shared row.
+    # themselves can stay bright; the check reads the two levels, not their shared row. Changed again on purpose
+    # (Photographer recheck 1, C): an old level dims its parts, not its box, so its age note can stay bright; the check
+    # reads how strongly each number is drawn.
     check("6 no answer for 12 s: the phone is not answering, in the warning look, and the last word dims",
-          warn[0].startswith("Your phone is not answering") and warn[1] and warn[2][0] and float(warn[2][1]) < 1 and float(warn[2][2]) < 1, warn)
+          warn[0].startswith("Your phone is not answering") and warn[1] and warn[2][0] and warn[2][1] < 1 and warn[2][2] < 1, warn)
 
     # 7. span
     pg.evaluate("asked = 0; window.__clients.forEach((c) => { c.sent.length = 0; })")
@@ -579,8 +619,9 @@ with sync_playwright() as p:
         }""")
         check("D5 all six rows and the \"Not counted\" line fit above the chart, no name cut", fit["inside"] and fit["above"] and not fit["clipped"], fit)
         mins = clock_minutes(v["left"])
-        check("D2 the time left is a clock time for 20% and for empty, from this stretch, rounded",
-              v["left"].startswith("20% around ") and " · empty around " in v["left"] and len(mins) == 2
+        # Changed on purpose (Director recheck 1, A): the line now says which pace it uses ("At this pace: …").
+        check("D2 the time left is a clock time for 20% and for empty, at the pace now, rounded",
+              v["left"].startswith("At this pace: 20% around ") and " · empty around " in v["left"] and len(mins) == 2
               and all(m % 5 == 0 for m in mins) and v["glassesNote"] == "", [v["left"], v["glassesNote"]])
         check("D4 the band's note is a whole number", re.fullmatch(r"Uses (about \d+|under \d+)% an hour", v["bandNote"] or "") is not None, v["bandNote"])
         layout["left_top"] = pg.evaluate("document.getElementById('left').getBoundingClientRect().top")
@@ -693,8 +734,9 @@ with sync_playwright() as p:
         s.set(p=True); s.run(35, 14)
         answer(pg, now_of(s), s.out)
         v = view(pg)
-        ok = (v["glasses"] == f"{s.now()['g']}%" and "low" in v["glassesCls"].split() and v["left"].startswith("Empty around ")
-              and " · " not in v["left"])
+        # Changed on purpose (Director recheck 1, A): "At this pace: empty around …" (was "Empty around …").
+        ok = (v["glasses"] == f"{s.now()['g']}%" and "low" in v["glassesCls"].split()
+              and v["left"].startswith("At this pace: empty around ") and " · " not in v["left"])
         check("D2 at 20% or less the line says when they will be empty", ok, v)
         shot(pg, "3-low")
         close(pg)
@@ -793,6 +835,254 @@ with sync_playwright() as p:
                      ("D5 files", case_files)]:
         guarded(name, fn)
 
+    # ---- N, A: the Director's recheck 1 ---------------------------------------------------------------------
+    # N11, N11r and N13 use the readings of recheck-1\director\scripts\recheck_harness.py (same Sim, same numbers).
+
+    def case_n11():
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - 140 * MIN, 92.0, band=85.0, band_rate=0.8)
+        s.set(gc="CHARGING")               # on the charger until 140 min ago
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", w="DOFFED")
+        s.run(95, 3)                       # on the desk, not worn, 3 %/h
+        s.set(w="DONNED", m=True)
+        s.run(44, 22)                      # Follow my voice, 22 %/h, still going
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        low, empty = true_targets(s.t, s.level, 22)
+        got_low, got_empty = int(v["leftData"].get("low", "0")), int(v["leftData"].get("empty", "0"))
+        ok = (v["left"].startswith("At this pace: 20% around ") and " · empty around " in v["left"]
+              and abs(got_low - low) < 10 * MIN and abs(got_empty - empty) < 10 * MIN
+              and near(rate_of(v["rows"], "Follow my voice (glasses mic on)"), 22, 2))
+        check("N11 95 min off the face, then 44 min of Follow my voice: the time left is at this pace, within 10 minutes "
+              "of the truth at 22% an hour (bccfc7c: 3-4 hours late)",
+              ok, [v["left"], (got_low - low) / MIN, (got_empty - empty) / MIN, v["rows"]])
+        shot(pg, "N11-at-this-pace")
+        close(pg)
+
+    def case_n11r():
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - 91 * MIN, 100.0, band=85.0, band_rate=5.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", w="DOFFED")
+        s.run(60, 25)                      # off, 25 %/h (the coordinator's rough not-worn figure)
+        s.set(w="DONNED", a="tidal", p=True)
+        s.run(30, 50)                      # Tidal Glass open with music, 50 %/h, still going
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        low, empty = true_targets(s.t, s.level, 50)
+        got_low, got_empty = int(v["leftData"].get("low", "0")), int(v["leftData"].get("empty", "0"))
+        ok = (v["left"].startswith("At this pace: 20% around ") and " · empty around " in v["left"]
+              and abs(got_low - low) < 10 * MIN and abs(got_empty - empty) < 10 * MIN)
+        check("N11r real-like rates, an hour off at 25% then 30 min of Tidal Glass at 50% an hour: 20% and empty within "
+              "10 minutes of the truth (bccfc7c: about 18 and 29 minutes late)",
+              ok, [v["left"], (got_low - low) / MIN, (got_empty - empty) / MIN])
+        close(pg)
+
+    def case_n13():
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - 160 * MIN, 95.0, band=85.0, band_rate=1.5)
+        s.run(40, 30)                      # worn, 30 %/h, every percent reported
+        s.set(w="DOFFED")
+        s.run(90, 20, visible=False)       # IF the toolkit sent no level while they were off (not verified)
+        s.shown_g = s.shown()
+        s.set(w="DONNED")                  # put on again: the level arrives with the worn state, 30 points lower
+        s.run(30, 30)
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        ok = (rate_of(v["rows"], "Not worn") is None and not any("under" in r for r in v["rows"])
+              and near(rate_of(v["rows"], "Worn, anything else"), 30, 3))
+        check("N13 90 min off the face with no level seen, then 30 points lower: no \"Not worn\" row saying \"under 1% an "
+              "hour\" (true: 20% an hour, unseen)", ok, v["rows"])
+        close(pg)
+
+    def case_n13_band():
+        # The band read every 15 minutes: 80% for 90 minutes, then 70%. The span before the drop is not quiet either.
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        t0 = now_ms - 126 * MIN
+        h = []
+        for i in range(22):                # a line every 6 minutes, on each change of the glasses (10 %/h)
+            at = t0 + i * 6 * MIN
+            read = t0 + (i * 6 // 15) * 15 * MIN
+            h.append({"at": at, "g": 90 - i, "gc": "NOT_CHARGING", "w": "DONNED", "c": True, "a": "", "m": False,
+                      "p": False, "b": 80 if read - t0 <= 90 * MIN else 70, "bt": read})
+        answer(pg, {k: h[-1][k] for k in ("g", "gc", "w", "c", "b", "bt", "a", "m", "p")}, h)
+        v = view(pg)
+        check("N13 the band's note gives no \"under X% an hour\" from a span that ended 10 points lower",
+              "under" not in v["bandNote"], v["bandNote"])
+        close(pg)
+
+    def case_gap_keeps_quiet():
+        # A phone that was off for 7 hours, with the level the same on both sides: the quiet hour before still counts.
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        base = {"g": 60, "gc": "NOT_CHARGING", "w": "DOFFED", "c": True, "a": "", "m": False, "p": False}
+        h = [{**base, "at": now_ms - 9 * HOUR + i * 20 * MIN, "b": 80 - i} for i in range(4)]  # a line per band change
+        h.append({**base, "at": now_ms - 10 * MIN, "b": 72})
+        answer(pg, {k: h[-1][k] for k in ("g", "gc", "w", "c", "b", "a", "m", "p")}, h)
+        v = view(pg)
+        nw = rate_of(v["rows"], "Not worn")
+        check("B a gap over 6 hours with the level unchanged keeps the quiet hour before it (\"under 1% an hour\")",
+              nw is not None and nw[0] == "under", v["rows"])
+        close(pg)
+
+    def case_since_unplugging():
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - 181 * MIN, 90.0, band=80.0, band_rate=0.5)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", a="tidal")
+        s.run(60, 16)                      # Tidal Glass, 16 %/h
+        s.set(w="DOFFED", a="")
+        s.run(120, 1.5)                    # off the face 2 hours, a change every 40 minutes
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        ok = v["left"].startswith("At the pace since unplugging: 20% around ") and " · " not in v["left"]
+        check("A fewer than 3 changes in the last 30 minutes: the pace since unplugging, said so, with one time", ok, v["left"])
+        shot(pg, "13-since-unplugging")
+        close(pg)
+
+    def case_since_reconnect():
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - (60 + 20 + 150) * MIN - 10_000, 100.0, band=92.0, band_rate=1.0)
+        s.set(a="tidal")
+        s.run(60, 18)
+        s.set(c=False)
+        s.run(20, 2, visible=False)        # the phone loses the glasses for 20 minutes
+        s.t += 2000
+        s.f.update(c=True, w="DOFFED", gc="UNKNOWN", a="")
+        s.emit(g=0)                        # the toolkit's 0 with charging unknown
+        s.t += 5000
+        s.f.update(gc="NOT_CHARGING")
+        s.shown_g = s.shown()
+        s.emit()
+        start = s.t
+        s.run(150, 2)                      # not worn since, 2 %/h
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        at = clock_of(pg, start)
+        ok = v["left"].startswith(f"At the pace since {at}: 20% around ") and "unplugging" not in v["left"]
+        check("A after the phone lost the glasses, the pace is said since the time it found them again, not since unplugging",
+              ok, [v["left"], at])
+        close(pg)
+
+    def case_line_fits():
+        pg = page_at(URL, connect=True)
+        longest = ["At this pace: 20% around 12:30 AM · empty around 12:30 AM",
+                   "At this pace: 20% around Wed 12:30 AM",
+                   "At the pace since unplugging: 20% around Wed 12:30 AM",
+                   "At the pace since unplugging: empty around Wed 12:30 AM",
+                   "At the pace since Wed 12:30 AM: 20% around Wed 12:30 AM",
+                   "At the pace since Wed 12:30 AM: empty around Wed 12:30 AM",
+                   "20% around Wed 12:30 AM if Follow my voice stays on",
+                   "Empty around Wed 12:30 AM if Follow my voice stays on",
+                   "Phone app lost the glasses at Wed 12:30 AM"]
+        measure_js = """(texts) => {
+            const el = document.getElementById('left');
+            const keep = el.textContent;
+            const out = texts.map((t) => { el.textContent = t; return [t, Math.round(el.getBoundingClientRect().height)]; });
+            el.textContent = keep;
+            return out;
+        }"""
+        res = {"page font": pg.evaluate(measure_js, longest)}
+        pg.add_style_tag(content="html, body, button { font-family: Inter, sans-serif !important; }")
+        pg.wait_for_timeout(200)
+        res["Inter (wider)"] = pg.evaluate(measure_js, longest)
+        check("A the longest time lines stay on one line, in the page's font and in the wider Inter",
+              all(hgt <= ONE_LINE for rows in res.values() for _, hgt in rows), res)
+        close(pg)
+
+    for name, fn in [("N11", case_n11), ("N11r", case_n11r), ("N13", case_n13), ("N13 band", case_n13_band),
+                     ("B gap", case_gap_keeps_quiet), ("A since unplugging", case_since_unplugging),
+                     ("A since reconnect", case_since_reconnect), ("A line fits", case_line_fits)]:
+        guarded(name, fn)
+
+    # ---- P: the Photographer's recheck 1 ----------------------------------------------------------------------
+
+    def case_calm_warning():
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        pg.evaluate("ask()")
+        pg.wait_for_timeout(100)
+        pg.evaluate("asked = Date.now() - 13000; render(); lastInputAt = Date.now() - 16000; checkCalm()")
+        pg.wait_for_timeout(100)
+        a = pg.evaluate("""[document.body.classList.contains('calm'), document.getElementById('state').classList.contains('warn'),
+            __eff('#state'), getComputedStyle(document.getElementById('state')).color, __eff('#glasses .pct'), __eff('#band .pct')]""")
+        shot(pg, "9-not-answering-calm")
+        pg.evaluate("asked = 0; render()")
+        pg.wait_for_timeout(100)
+        b = pg.evaluate("[document.body.classList.contains('calm'), document.getElementById('state').classList.contains('warn'), __eff('#state')]")
+        ok = a[0] and a[1] and a[2] == 1 and a[3] == AMBER and a[2] > max(a[4], a[5]) and b[0] and not b[1] and b[2] < 1
+        check("P-A in calm the \"not answering\" warning keeps its full strength, above the old numbers; a plain top line "
+              "still dims", ok, [a, b])
+        close(pg)
+
+    def case_bars():
+        seen = []
+        for name, g, band in (("glasses 100%", 100, None), ("glasses 9%", 9, None), ("glasses 35%", None, None),
+                              ("band, no permission", None, "no-permission"), ("band, no battery service", None, "no-battery-service")):
+            pg = page_at(URL, connect=True)
+            s = normal_day(pg.evaluate("Date.now()"))
+            now = now_of(s)
+            h = s.out
+            if g is not None:
+                now["g"] = g
+            if band:
+                now.update(b=-1, bw=band)
+                h = [{**r, "b": -1} for r in s.out]
+            answer(pg, now, h)
+            m = pg.evaluate("""() => ['glasses', 'band'].map((id) => {
+                const box = (sel) => document.querySelector(`#${id} ${sel}`).getBoundingClientRect();
+                const level = document.getElementById(id).getBoundingClientRect();
+                return { id, level: Math.round(level.width), bar: Math.round(box('.bar').width),
+                         gap: Math.round(box('.pct').left - box('.name').right), pct: document.querySelector(`#${id} .pct`).textContent };
+            })""")
+            seen.append([name, m])
+            if g == 100:
+                shot(pg, "10-glasses-100")
+            if band == "no-permission":
+                shot(pg, "11-band-no-permission")
+            close(pg)
+        bars = [x["bar"] for _, m in seen for x in m]
+        ok = (all(abs(x["bar"] - x["level"]) <= 1 and 0 <= x["gap"] <= 16 for _, m in seen for x in m)
+              and max(bars) - min(bars) <= 1)
+        check("P-B each bar runs its whole column (glasses at 100%, 35% and 9%; band beside its longest reasons); "
+              "the number and the dash sit just after their names", ok, seen)
+
+    def case_age_note():
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s, bt=s.t - 3 * HOUR), s.out)
+        a = pg.evaluate("""[document.getElementById('bandNote').textContent, document.getElementById('band').classList.contains('old'),
+            __eff('#bandNote'), __eff('#band .pct')]""")
+        shot(pg, "12-band-read-3h")
+        close(pg)
+        check("P-C \"Read 3 h ago\" keeps its full strength while the old band number dims",
+              a[0] == "Read 3 h ago" and a[1] and a[2] == 1 and a[3] < 1, a)
+        # The Photographer's S05: with the phone not answering, the band's rate note stays as dim as its old number.
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        pg.evaluate("ask()")
+        pg.wait_for_timeout(100)
+        pg.evaluate("asked = Date.now() - 13000; render()")
+        b = pg.evaluate("[document.getElementById('bandNote').textContent, __eff('#bandNote'), __eff('#band .pct')]")
+        close(pg)
+        check("P-C with the phone not answering, the band's rate note is no brighter than its old number",
+              b[0].startswith("Uses ") and b[1] <= b[2] < 1, b)
+
+    for name, fn in [("P-A", case_calm_warning), ("P-B", case_bars), ("P-C", case_age_note)]:
+        guarded(name, fn)
+
+    check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)
     check("no page errors", not errors, "; ".join(errors))
     browser.close()
 

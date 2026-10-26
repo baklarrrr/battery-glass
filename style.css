@@ -48,11 +48,13 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 .state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .state.warn { color: var(--low); font-weight: 600; }
 
-/* ---- the two levels ------------------------------------------------------------------------------- */
+/* ---- the two levels -------------------------------------------------------------------------------
+   Each bar runs the whole column, whatever the number and the note say, so two equal levels draw equal bars; the
+   number sits just after its name. */
 .levels { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
-.level { display: grid; grid-template-columns: auto auto; justify-content: start; align-items: baseline; column-gap: 12px; row-gap: 6px; }
+.level { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 12px; row-gap: 6px; }
 .level .name { font-size: 17px; color: var(--soft); }
-.level .pct { font-size: 52px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.level .pct { justify-self: start; font-size: 52px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
 .level .bar { grid-column: 1 / -1; block-size: 6px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--hair); overflow: hidden; }
 .level .fill { display: block; block-size: 100%; inline-size: 0; background: var(--soft); }
 .level .note { grid-column: 1 / -1; min-block-size: 20px; font-size: 15px; color: var(--dim); }
@@ -61,7 +63,8 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 .level.low .pct { color: var(--low); }
 .level.low .fill { background: var(--low); }
 .level.unknown .pct { color: var(--dim); font-weight: 400; }
-.level.old { opacity: 0.55; }
+/* An old level dims, but not the note saying how old it is ("Read 3 h ago"): that note explains the dim number. */
+.level.old .name, .level.old .pct, .level.old .bar, .level.old .note:not(.age) { opacity: 0.55; }
 
 .left { margin: 0; font-size: 18px; color: var(--soft); min-block-size: 24px; }
 
@@ -104,9 +107,9 @@ button {
 button:focus-visible, button:focus { border-color: var(--ink); }
 
 /* ---- calm: less light while nobody is touching it ----------------------------------------------------------
-   After 15 s without input the details and outlines dim; the two levels and a low level never dim, and the
-   focus ring rests: still white and thin, dimmer, never a glow. The first input wakes it. */
-body.calm .uses, body.calm .topline, body.calm .chart, body.calm .chartlabels, body.calm .key { opacity: 0.55; }
+   After 15 s without input the details and outlines dim; the two levels, a low level and the "not answering" warning
+   never dim, and the focus ring rests: still white and thin, dimmer, never a glow. The first input wakes it. */
+body.calm .uses, body.calm .state:not(.warn), body.calm .chart, body.calm .chartlabels, body.calm .key { opacity: 0.55; }
 body.calm button { border-color: rgba(255, 255, 255, 0.16); color: var(--dim); }
 body.calm button:focus, body.calm button:focus-visible { border-color: rgba(255, 255, 255, 0.5); }
 body.calm .level:not(.low) .fill { opacity: 0.6; }

@@ -37,6 +37,7 @@ const LONG_GAP = 6 * HOUR; // two readings this far apart: a phone that was off
 const ROW_POINTS = 3; // a row in the list needs 3 points of fall measured over 30 minutes
 const ROW_HOURS = 0.5;
 const STRETCH_TICKS = 3; // the time left needs 3 changes of the level in the current stretch off the charger
+const PACE = 30 * MIN; // "At this pace": 3 or more of those changes in the last 30 minutes
 const BAND_FRESH = 30 * MIN; // a band level read longer ago than this says how old it is
 const BAND_STALE = 45 * MIN; // a reading whose band level was read longer before it is not drawn
 const GAP = 30 * MIN; // the chart's line breaks across time the phone could not vouch for, when longer than this
@@ -348,14 +349,14 @@ function chargeLevel(r) {
 // unbroken stretch: a reading the phone could not vouch for, a jump of more than 2 points, a step the wrong way or a gap
 // over 6 hours ends the stretch, and the next change only starts a new one. The time between two changes counts for a
 // group only when that group held all the way between them. `quiet` is the longest time a group held with no change at
-// all (less than a point fell in it), for "under X% an hour"; `fell` says some change happened while it held.
+// all (less than a point fell in it), for "under X% an hour"; `fell` says some change happened while it held. The last
+// stretch comes back as `end`: its last reading, the index of its first reading (`from`) and its changes, oldest first.
 function measure(readings, levelOf, groupOf, rising = false, timeOf = (r) => r.at) {
   const groups = {};
   const slot = (k) => groups[k] || (groups[k] = { points: 0, hours: 0, quiet: 0, fell: false });
   let prev = null; // the last reading of this stretch: { at, level, group }
-  let first = null; // the first change of this stretch
-  let tick = null; // its last change
-  let ticks = 0;
+  let from = -1; // the index of its first reading
+  let changes = []; // its changes of the level: { at, level }
   let held = null; // the groups seen since the last change
   let still = null; // since when this level and this group have held: { at, group }
   const endQuiet = (at) => {
@@ -367,39 +368,45 @@ function measure(readings, levelOf, groupOf, rising = false, timeOf = (r) => r.a
   };
   const stop = (at) => {
     endQuiet(at);
-    prev = first = tick = held = null;
-    ticks = 0;
+    prev = held = null;
+    from = -1;
+    changes = [];
   };
-  for (const r of readings) {
+  readings.forEach((r, i) => {
     const level = levelOf(r);
     const at = timeOf(r);
     const group = level >= 0 ? groupOf(r) : null;
     if (group == null) {
       if (prev) stop(at); // the level held until the phone stopped vouching for it
-      continue;
+      return;
     }
     if (prev) {
       const step = rising ? level - prev.level : prev.level - level;
-      if (step < 0 || step > JUMP || at - prev.at > LONG_GAP) stop(prev.at);
+      if (step < 0 || step > JUMP) {
+        // The level moved where the phone did not see it, so the time it seemed to hold before is not vouched for:
+        // that quiet span is dropped, not counted as "under X% an hour".
+        still = null;
+        stop(prev.at);
+      } else if (at - prev.at > LONG_GAP) stop(prev.at); // a phone that was off: what it saw until then stands
     }
     if (!prev) {
       prev = { at, level, group };
+      from = i;
       held = new Set([group]);
       still = { at, group };
-      continue;
+      return;
     }
     if (level !== prev.level) {
       endQuiet(at);
       for (const k of held) slot(k).fell = true;
+      const tick = changes[changes.length - 1];
       if (tick && held.size === 1) {
         const [only] = held;
         const o = slot(only);
         o.points += Math.abs(tick.level - level);
         o.hours += (at - tick.at) / HOUR;
       }
-      tick = { at, level };
-      if (!first) first = tick;
-      ticks++;
+      changes.push({ at, level });
       held = new Set([group]);
       still = { at, group };
     } else {
@@ -410,17 +417,23 @@ function measure(readings, levelOf, groupOf, rising = false, timeOf = (r) => r.a
       }
     }
     prev = { at, level, group };
-  }
+  });
   if (prev) endQuiet(prev.at);
-  return { groups, end: prev && { level: prev.level, at: prev.at, first, tick, ticks } };
+  return { groups, end: prev && { level: prev.level, at: prev.at, from, changes, tick: changes[changes.length - 1] || null } };
 }
 
-// Points per hour from the first change of the last stretch to its last change.
-function stretchRate(end) {
-  if (!end || !end.first || end.ticks < STRETCH_TICKS) return 0;
-  const points = Math.abs(end.first.level - end.tick.level);
-  const hours = (end.tick.at - end.first.at) / HOUR;
+// Points per hour from the first of these changes of the level to the last (3 changes at least).
+function rateOf(changes) {
+  if (changes.length < STRETCH_TICKS) return 0;
+  const first = changes[0];
+  const last = changes[changes.length - 1];
+  const points = Math.abs(first.level - last.level);
+  const hours = (last.at - first.at) / HOUR;
   return points > 0 && hours > 0 ? points / hours : 0;
+}
+
+function stretchRate(end) {
+  return end ? rateOf(end.changes) : 0;
 }
 
 // The phone's word now as one more reading at its time, when it shows nothing new: it says the last state held until
@@ -492,10 +505,13 @@ function lostAt() {
 
 // The line under the levels: when to charge, said as a clock time.
 // - Charging: when they will be full, from this charge's own readings.
-// - Otherwise from the current stretch off the charger, from one change of the level to another (3 changes at least);
-//   it starts after the last reading that was charging, unknown or without the glasses, so a top-up or a reconnect
-//   starts it again.
-// - Until then, today's rate for what is going on now, said as such.
+// - Otherwise from the current stretch off the charger, from one change of the level to another; it starts after the
+//   last reading that was charging, unknown or without the glasses, or where the readings break (a jump, a rise, 6 hours
+//   with no reading), so a top-up or a reconnect starts it again.
+//   - 3 changes or more in the last 30 minutes: the pace now, "At this pace: …".
+//   - Fewer (a slow drain, such as off the face): the pace over the whole stretch (3 changes at least), "At the pace
+//     since unplugging: …", or since the time it starts when it did not start at the charger.
+// - Until then, today's rate for what is going on now, said as such ("… if Tidal Glass stays open").
 function timeLine(G) {
   const none = { text: '' };
   if (!(G.value >= 0)) return none;
@@ -512,23 +528,33 @@ function timeLine(G) {
     return { text: lost ? `Phone app lost the glasses at ${when(lost)}` : 'Phone app lost the glasses' };
   }
   const { end } = measure(history, drainLevel, () => 'off');
-  const rate = stretchRate(end);
+  const changes = end ? end.changes : [];
+  const pace = rateOf(changes.filter((c) => c.at >= Date.now() - PACE));
+  const rate = pace || rateOf(changes);
   if (rate) {
     if (G.value > end.tick.level + 1) return none; // higher than the phone's last reading: charged since
-    // From the last change the level falls at the stretch's rate. A change overdue means it falls slower now, so it is
-    // taken as just about to change; the glasses' own reading, when it is ahead of the phone's, starts from now.
+    // From the last change the level falls at this rate. A change overdue means it falls slower now, so it is taken as
+    // just about to change; the glasses' own reading, when it is ahead of the phone's, starts from now.
     let at = Math.max(end.tick.at, Date.now() - HOUR / rate);
     let level = end.tick.level;
     if (G.value < level) {
       at = Date.now();
       level = G.value;
     }
-    return targets(level, at, rate, '');
+    return pace ? targets(level, at, rate, { lead: 'At this pace', both: true })
+      : targets(level, at, rate, { lead: `At the pace ${since(end)}` });
   }
   const s = situation(current());
   const day = s && measure(withinDay(), drainLevel, situation).groups[s];
-  if (day && day.points >= ROW_POINTS && day.hours >= ROW_HOURS) return targets(G.value, Date.now(), day.points / day.hours, IF_SAME[s]);
+  if (day && day.points >= ROW_POINTS && day.hours >= ROW_HOURS) return targets(G.value, Date.now(), day.points / day.hours, { condition: IF_SAME[s] });
   return none;
+}
+
+// What the stretch's pace is measured since: unplugging, when the reading just before it was on the charger; otherwise
+// (the phone lost the glasses, could not vouch for the level, or the readings broke) the time the stretch starts.
+function since(end) {
+  const before = history[end.from - 1];
+  return before && before.c !== false && before.gc === 'CHARGING' ? 'since unplugging' : `since ${when(history[end.from].at)}`;
 }
 
 function withinDay() {
@@ -536,12 +562,16 @@ function withinDay() {
   return history.filter((r) => r.at >= from);
 }
 
-function targets(level, at, rate, condition) {
+// When the level reaches 20% and empty at this rate. `lead` says which pace it is; `condition` what the time depends
+// on. The line must stay on one line: only "At this pace" adds the empty time, and only when it needs no day name.
+function targets(level, at, rate, { lead = '', condition = '', both = false } = {}) {
   const low = at + ((level - LOW) / rate) * HOUR;
   const empty = at + (level / rate) * HOUR;
-  if (level <= LOW) return { text: `Empty around ${when(roundTime(empty))}${condition ? ` ${condition}` : ''}`, empty };
-  if (condition) return { text: `${LOW}% around ${when(roundTime(low))} ${condition}`, low, empty };
-  return { text: `${LOW}% around ${when(roundTime(low))} · empty around ${when(roundTime(empty))}`, low, empty };
+  const say = (text) => `${lead ? `${lead}: ${text}` : text[0].toUpperCase() + text.slice(1)}${condition ? ` ${condition}` : ''}`;
+  if (level <= LOW) return { text: say(`empty around ${when(roundTime(empty))}`), empty };
+  const first = `${LOW}% around ${when(roundTime(low))}`;
+  if (both && !needsDay(roundTime(empty))) return { text: say(`${first} · empty around ${when(roundTime(empty))}`), low, empty };
+  return { text: say(first), low, empty };
 }
 
 // A clock time no finer than the data: to 5 minutes within the hour, 15 minutes within 3 hours, 30 minutes beyond.
@@ -577,12 +607,16 @@ function clock(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-// A clock time, with the day when it is neither today nor within 12 hours.
+// A time needs its day said when it is neither today nor within 12 hours.
+function needsDay(ms) {
+  return new Date(ms).toDateString() !== new Date().toDateString() && Math.abs(ms - Date.now()) >= 12 * HOUR;
+}
+
+// A clock time, with the day when it needs it.
 function when(ms) {
   if (!ms) return 'earlier';
-  const d = new Date(ms);
-  if (d.toDateString() === new Date().toDateString() || Math.abs(ms - Date.now()) < 12 * HOUR) return clock(ms);
-  return `${d.toLocaleDateString([], { weekday: 'short' })} ${clock(ms)}`;
+  if (!needsDay(ms)) return clock(ms);
+  return `${new Date(ms).toLocaleDateString([], { weekday: 'short' })} ${clock(ms)}`;
 }
 
 // ---- drawing ----------------------------------------------------------------------------------------
@@ -654,10 +688,13 @@ function renderData() {
   const windowMs = WINDOWS[span];
   const inWindow = history.filter((r) => r.at >= Date.now() - windowMs);
   let note = '';
+  const age = bandAge > BAND_FRESH; // only ever with a band level
   if (phone && band < 0) note = BAND_WHY[phone.bw] || (heard ? 'Not read yet' : '');
-  else if (bandAge > BAND_FRESH) note = `Read ${ago(bandAge)}`;
+  else if (age) note = `Read ${ago(bandAge)}`;
   else if (band >= 0) note = bandRate(inWindow);
   setText($('bandNote'), note);
+  // "Read 3 h ago" says why the number above it is dim, so it is not dimmed with it.
+  $('bandNote').classList.toggle('age', age);
   // A "read … ago" moves with the clock; it alone is drawn again each minute while shown.
   clearTimeout(ageTimer);
   if (bandAge > BAND_FRESH && document.visibilityState === 'visible') ageTimer = setTimeout(() => { version++; render(); }, MIN);
