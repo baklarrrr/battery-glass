@@ -127,7 +127,8 @@ function linkUp() {
 // tries to shiftr alone), which keeps the radio awake. Now: 1 s for the first three tries, then doubling to 30 s while
 // nothing is connected; a broker that keeps failing while another carries the link backs off to 10 min. A connect, a
 // network change ('online') or a visit that opens the link again starts it fast again (each opens fresh links). The
-// link closes when the page is hidden, and closing it clears every pending retry, so nothing is tried while hidden.
+// link closes 400 ms after the page is hidden, and closing it clears every pending retry, so from then on nothing is
+// tried (a retry already due in those 400 ms can still go out).
 function retryDelay(fails, othersUp) {
   if (othersUp) return Math.min(600000, 1000 * 2 ** Math.min(fails, 10));
   return fails <= 3 ? 1000 : Math.min(30000, 1000 * 2 ** (fails - 3));

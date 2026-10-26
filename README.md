@@ -23,7 +23,8 @@ retained) is shown with its time and never replaces what the phone said on this 
 All three brokers are opened together, and the page schedules each one's retries itself, as Tidal Glass build 17 does
 (mqtt.js's own reconnect is off; connect timeout 6 s): 1 s for the first three tries, then doubling to 30 s while
 nothing is connected, and up to 10 minutes for a broker that keeps failing while another carries the link. The link
-closes 400 ms after the page is hidden, and closing it clears every pending retry, so nothing is tried while hidden.
+closes 400 ms after the page is hidden, and closing it clears every pending retry, so from then on nothing is tried (a
+retry already due in those 400 ms can still go out).
 
 ## How the numbers are worked out
 
