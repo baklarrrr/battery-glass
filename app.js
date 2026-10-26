@@ -37,7 +37,11 @@ const LONG_GAP = 6 * HOUR; // two readings this far apart: a phone that was off
 const ROW_POINTS = 3; // a row in the list needs 3 points of fall measured over 30 minutes
 const ROW_HOURS = 0.5;
 const STRETCH_TICKS = 3; // the time left needs 3 changes of the level in the current stretch off the charger
-const PACE = 30 * MIN; // "At this pace": 3 or more of those changes since the situation last changed, in the last 30 minutes
+const PACE = 30 * MIN; // "At this pace": 3 or more of those changes since the situation last changed, in the last 30 minutes,
+const PACE_SPAN = 5 * MIN; // spanning 5 minutes at least, so three quick changes do not set the pace alone
+const BLIP = MIN; // an off-the-face spell shorter than this between two worn readings is taken for the wear sensor
+const LEVEL_FRESH = 30 * MIN; // no time is worked out from a glasses level the phone vouched for longer ago than this
+const CHARGED = 80; // while charging, a time is given up to this level only (a charge slows near full, unmeasured here)
 const BAND_FRESH = 30 * MIN; // a band level read longer ago than this says how old it is
 const BAND_STALE = 45 * MIN; // a reading whose band level was read longer before it is not drawn
 const GAP = 30 * MIN; // the chart's line breaks across time the phone could not vouch for, when longer than this
@@ -52,7 +56,9 @@ let request = null; // that request: { ts, since, incremental }
 let askTimer = 0;
 let tickTimer = 0;
 let ageTimer = 0;
+let levelTimer = 0;
 let hideTimer = 0;
+let downAt = 0; // since when no broker has carried the link on this visit (0: one does, or the link is closed)
 let lastInputAt = Date.now();
 let span = 'day';
 let phone = null; // the phone's word on the levels: { g, gc, w, c, b, bt, bw, a, m, p, at, live }
@@ -148,6 +154,7 @@ function scheduleRetry(client) {
 // every try that hangs costs the whole timeout before the next one.
 function openLink() {
   if (links.length || typeof mqtt === 'undefined') return;
+  downAt = Date.now();
   const id = toB64url(crypto.getRandomValues(new Uint8Array(6))).replace(/[-_]/g, 'x');
   for (const { url, ...extra } of BROKERS) {
     const client = mqtt.connect(url, {
@@ -159,6 +166,7 @@ function openLink() {
       clearTimeout(client.retryTimer);
       client.retryTimer = 0;
       everLinked = true;
+      downAt = 0;
       client.subscribe([`bkr/${topic}/s`, `bkr/${topic}/bat`], { qos: 1 });
       // A broker that connects while a request is unanswered gets it too: the phone may be on that one only.
       if (asked) publishRequest(client);
@@ -167,7 +175,12 @@ function openLink() {
     // A broker hands over its stored copy of the phone's state on subscribing, marked retained; what the phone
     // publishes while the page listens arrives unmarked.
     client.on('message', (t, payload, packet) => handle(new TextDecoder().decode(payload), !!(packet && packet.retain)));
-    client.on('close', () => { render(); scheduleRetry(client); });
+    client.on('close', () => {
+      if (!linkUp() && !downAt && links.includes(client)) downAt = Date.now();
+      render();
+      schedule();
+      scheduleRetry(client);
+    });
     client.on('error', () => { /* a failed try ends in 'close', which schedules the next one */ });
     links.push(client);
   }
@@ -177,6 +190,7 @@ function closeLink() {
   const old = links;
   links = [];
   everLinked = false;
+  downAt = 0;
   for (const l of old) { clearTimeout(l.retryTimer); try { l.end(true); } catch (e) { /* already closed */ } }
 }
 
@@ -326,12 +340,15 @@ function settle(r) {
   return r.g === 0 && r.gc !== 'CHARGING' && r.gc !== 'NOT_CHARGING' ? { ...r, g: -1 } : r;
 }
 
+// "Tidal playing" is Tidal's own playing state on the phone (p); other apps' audio is not seen, so it is not "music"
+// (Director recheck 1, E). "Follow my voice" names no microphone: the phone listens through the glasses' microphone
+// when it can reach it, and through its own otherwise, and a reading does not say which.
 const PLACES = {
   notworn: 'Not worn',
-  voice: 'Follow my voice (glasses mic on)',
+  voice: 'Follow my voice',
   tidal: 'Tidal Glass open',
   sound: 'Sound Lab open',
-  music: 'Music playing',
+  music: 'Tidal playing',
   worn: 'Worn, anything else',
 };
 // What a time worked out from one situation's rate depends on.
@@ -340,22 +357,30 @@ const IF_SAME = {
   voice: 'if Follow my voice stays on',
   tidal: 'if Tidal Glass stays open',
   sound: 'if Sound Lab stays open',
-  music: 'if the music keeps playing',
+  music: 'if Tidal keeps playing',
   worn: 'if you keep them on',
 };
-// Why the phone cannot read the band, each short enough for the one line under it, so nothing below moves.
+// Why the phone cannot read the band, each short enough for the one line under it, so nothing below moves. The phone
+// says "out-of-range" when it tried to read a band that did not answer: out of range, or off, or flat, so the words
+// name no cause. Phone builds without the "bt-off" and "not-read-yet" codes also said it with Bluetooth off and before
+// the first read, which the words cover too.
 const BAND_WHY = {
   'no-permission': 'Phone app needs Bluetooth access',
   'not-paired': 'Not paired with your phone',
   'no-battery-service': "Doesn't share its battery level",
-  'out-of-range': "Out of your phone's range",
+  'out-of-range': "Your phone can't reach it",
+  'bt-off': 'Bluetooth is off on your phone',
+  'not-read-yet': 'Not read yet',
 };
 
-// Quran Glass talks to the phone only during Follow my voice, so its "in use" is folded into Follow my voice.
+// Follow my voice counts while the phone says it is listening (m); the phone ends m when Follow my voice stops. Quran
+// Glass's own "in use" lasts 4 minutes after its last message, so it is not folded in: minutes after Follow my voice
+// stopped would count as listening. Quran Glass open without Follow my voice falls under what else is going on (the
+// note under the list says it is not counted).
 function situation(r) {
   if (r.w === 'DOFFED') return 'notworn';
   if (r.w !== 'DONNED') return null;
-  if (r.m || r.a === 'quran') return 'voice';
+  if (r.m) return 'voice';
   if (r.a === 'tidal') return 'tidal';
   if (r.a === 'sound') return 'sound';
   if (r.p) return 'music';
@@ -507,11 +532,12 @@ function bandRate(readings) {
   return '';
 }
 
-// The glasses' level shown: the glasses' own reading first, else the phone's.
+// The glasses' level shown: the glasses' own reading first, else the phone's. `at`: when that level was last vouched
+// for (now for the glasses' own reading, else the time of the phone's word).
 function glassesShown(stale) {
-  if (own) return { value: own.level, charging: own.charging, old: false };
-  if (phone && phone.g >= 0) return { value: phone.g, charging: phone.gc === 'CHARGING', old: stale || phone.c === false };
-  return { value: -1, charging: !!phone && phone.gc === 'CHARGING', old: false };
+  if (own) return { value: own.level, charging: own.charging, old: false, at: Date.now() };
+  if (phone && phone.g >= 0) return { value: phone.g, charging: phone.gc === 'CHARGING', old: stale || phone.c === false, at: phone.at };
+  return { value: -1, charging: !!phone && phone.gc === 'CHARGING', old: false, at: 0 };
 }
 
 // What is going on now, for a time worked out from one situation's rate: the phone's word, else the last reading.
@@ -536,29 +562,69 @@ function situationKey(r) {
   return `${r.w}|${r.a || ''}|${!!r.m}|${!!r.p}`;
 }
 
+// What makes a change of situation besides worn or not: the app in use, Follow my voice, Tidal playing.
+function useKey(r) {
+  return `${r.a || ''}|${!!r.m}|${!!r.p}`;
+}
+
 // When the situation last changed inside the stretch that ends the readings (its first reading is history[from]): the
 // time of the first reading after the change, or 0 when it held all through. When the phone's word now differs from the
 // last reading in worn, the app in use or Follow my voice (they come only with an answer), it changed after the
 // readings: Infinity. Tidal playing is taken from the readings only, because the phone's state messages carry Tidal's
 // raw playing, which blinks off between songs.
+// An off-the-face spell of under a minute between two worn readings is not a change: real readings have spells of a
+// few seconds that look like the wear sensor rather than the glasses coming off, and each would start "At this pace"
+// again (Director recheck 3, A3). Only what else changed across it counts. A spell still going at the end counts.
 function switchedAt(from) {
   const last = history[history.length - 1];
   if (phone && last) {
     for (const k of ['w', 'a', 'm']) if (phone[k] !== undefined && last[k] !== undefined && phone[k] !== last[k]) return Infinity;
   }
-  for (let i = history.length - 1; i > from; i--) {
-    if (situationKey(history[i]) !== situationKey(history[i - 1])) return history[i].at;
+  let i = history.length - 1;
+  while (i > from) {
+    const r = history[i];
+    if (situationKey(r) === situationKey(history[i - 1])) {
+      i--;
+      continue;
+    }
+    if (r.w === 'DONNED' && history[i - 1].w === 'DOFFED') {
+      let j = i - 1; // the first reading of the spell off the face that ends here
+      while (j > from && history[j - 1].w === 'DOFFED') j--;
+      if (j > from && r.at - history[j].at < BLIP) {
+        const before = useKey(history[j - 1]);
+        for (let k = j; k <= i; k++) if (useKey(history[k]) !== before) return history[k].at;
+        i = j - 1;
+        continue;
+      }
+    }
+    return r.at;
   }
   return 0;
 }
 
-// The line under the levels: when to charge, said as a clock time.
-// - Charging: when they will be full, from this charge's own readings.
+// The changes of the level behind "At this pace": those since the situation last changed that are also in the 30
+// minutes before `asOf` (when the level shown was vouched for), 3 at least and spanning 5 minutes at least; else none.
+// Three changes a minute apart are too few to set a pace: the phone sees whole percents, at uneven times (A3).
+function paceChanges(end, asOf) {
+  if (!end) return [];
+  const from = Math.max(switchedAt(end.from), asOf - PACE);
+  const used = end.changes.filter((c) => c.at >= from);
+  return used.length >= STRETCH_TICKS && used[used.length - 1].at - used[0].at >= PACE_SPAN ? used : [];
+}
+
+// The line under the levels: when to charge, said as a clock time. Nothing is worked out from a level the phone vouched
+// for over 30 minutes ago (a copy kept from an earlier visit, a phone that stopped answering), unless the glasses read
+// their own battery; a younger one is worked out from its own time, not from now, and the top line dates it (Director
+// recheck 1-3, C).
+// - Charging: when they will reach 80%, from this charge's own readings, and nothing from 80% on. A charge runs at a
+//   steady rate and slows near full, by an amount not measured on these glasses, so a straight line to 100% would be
+//   early by an unknown margin (F).
 // - Otherwise from the current stretch off the charger, from one change of the level to another; it starts after the
 //   last reading that was charging, unknown or without the glasses, or where the readings break (a jump, a rise, 6 hours
 //   with no reading), so a top-up or a reconnect starts it again.
-//   - "At this pace: …" only from the changes since the situation last changed that are also in the last 30 minutes, 3
-//     at least, so it never blends two situations (Director recheck 2, A2).
+//   - "At this pace: …" only from the changes since the situation last changed (a blip off the face aside) that are
+//     also in the last 30 minutes, 3 at least and spanning 5 minutes at least, so it never blends two situations
+//     (Director recheck 2, A2) and three quick changes do not set it (recheck 3, A3).
 //   - Fewer: today's rate for what is going on now, when today's list has a row for it, said as such ("… if Tidal Glass
 //     stays open").
 //   - Else the pace over the whole stretch (3 changes at least), "At the pace since unplugging: …", or since the time it
@@ -566,38 +632,43 @@ function switchedAt(from) {
 function timeLine(G) {
   const none = { text: '' };
   if (!(G.value >= 0)) return none;
+  const asOf = Math.min(G.at, Date.now());
+  const old = Date.now() - G.at > LEVEL_FRESH;
   if (G.charging) {
-    if (G.value >= 100) return none;
+    if (old || G.value >= CHARGED) return none;
     const { end } = measure(history, chargeLevel, () => 'charging', true);
     const rate = stretchRate(end);
     if (!rate) return none;
-    const full = end.tick.at + ((100 - end.tick.level) / rate) * HOUR;
-    return full > Date.now() ? { text: `Full around ${when(roundTime(full))}`, full } : none;
+    // From the charge's last change, or from the level shown when it is ahead of it (the glasses' own reading).
+    const [at, level] = G.value > end.tick.level ? [asOf, G.value] : [end.tick.at, end.tick.level];
+    const charged = at + ((CHARGED - level) / rate) * HOUR;
+    return charged > Date.now() ? { text: `${CHARGED}% around ${when(roundTime(charged))}`, charged } : none;
   }
   if (phone && phone.c === false) {
     const lost = lostAt();
     return { text: lost ? `Phone app lost the glasses at ${when(lost)}` : 'Phone app lost the glasses' };
   }
+  if (old) return none;
   const { end } = measure(history, drainLevel, () => 'off');
   const changes = end ? end.changes : [];
   const rate = rateOf(changes);
   if (rate && G.value > end.tick.level + 1) return none; // higher than the phone's last reading: charged since
-  const paceFrom = Math.max(end ? switchedAt(end.from) : 0, Date.now() - PACE);
-  const pace = rateOf(changes.filter((c) => c.at >= paceFrom));
-  if (pace) return fromLastChange(G, end, pace, { lead: 'At this pace', both: true });
+  const pace = rateOf(paceChanges(end, asOf));
+  if (pace) return fromLastChange(G, end, pace, asOf, { lead: 'At this pace', both: true });
   const s = situation(current());
   const day = s && measure(withinDay(), drainLevel, situation).groups[s];
-  if (day && day.points >= ROW_POINTS && day.hours >= ROW_HOURS) return targets(G.value, Date.now(), day.points / day.hours, { condition: IF_SAME[s] });
-  return rate ? fromLastChange(G, end, rate, { lead: `At the pace ${since(end)}` }) : none;
+  if (day && day.points >= ROW_POINTS && day.hours >= ROW_HOURS) return targets(G.value, asOf, day.points / day.hours, { condition: IF_SAME[s] });
+  return rate ? fromLastChange(G, end, rate, asOf, { lead: `At the pace ${since(end)}` }) : none;
 }
 
-// From the stretch's last change the level falls at this rate. A change overdue means it falls slower now, so it is
-// taken as just about to change; the glasses' own reading, when it is ahead of the phone's, starts from now.
-function fromLastChange(G, end, rate, how) {
-  let at = Math.max(end.tick.at, Date.now() - HOUR / rate);
+// From the stretch's last change the level falls at this rate. A change overdue at `asOf` (when the level shown was
+// vouched for) means it falls slower now, so it is taken as just about to change then; the level shown, when it is
+// lower than the stretch's last change (the glasses' own reading, or the phone's word after the readings), starts then.
+function fromLastChange(G, end, rate, asOf, how) {
+  let at = Math.max(end.tick.at, asOf - HOUR / rate);
   let level = end.tick.level;
   if (G.value < level) {
-    at = Date.now();
+    at = asOf;
     level = G.value;
   }
   return targets(level, at, rate, how);
@@ -695,6 +766,12 @@ function notAnswering() {
   return !!asked && Date.now() - asked > ANSWER_WAIT;
 }
 
+// No broker has carried the link for 12 s: no answer can come either, so it is said as a warning too (Photographer
+// recheck 3, S1).
+function linkDown() {
+  return !!downAt && !linkUp() && Date.now() - downAt > ANSWER_WAIT;
+}
+
 // The phone's word is its last word, not news: from an earlier visit, a broker's copy, or a phone not answering now.
 function phoneStale() {
   return !phone || !phone.live || notAnswering() || !linkUp();
@@ -724,7 +801,7 @@ function renderTop() {
     if (g || b) text += ` · ${g && b ? 'levels' : g ? 'glasses' : 'band'} from ${when(phone.at)}`;
   }
   setText($('stateText'), text);
-  $('state').classList.toggle('warn', waiting);
+  $('state').classList.toggle('warn', waiting || linkDown());
   $('main').classList.toggle('stale', !!phone && phoneStale());
 }
 
@@ -757,11 +834,16 @@ function renderData() {
   setText(left, t.text);
   setAttr(left, 'data-low', t.low ? String(Math.round(t.low)) : null);
   setAttr(left, 'data-empty', t.empty ? String(Math.round(t.empty)) : null);
-  setAttr(left, 'data-full', t.full ? String(Math.round(t.full)) : null);
+  setAttr(left, 'data-charged', t.charged ? String(Math.round(t.charged)) : null);
+  // A time worked out from the phone's level goes when that level turns 30 minutes old, even with nothing else new.
+  clearTimeout(levelTimer);
+  const due = G.at + LEVEL_FRESH - Date.now();
+  if (t.text && !own && due > 0 && document.visibilityState === 'visible') levelTimer = setTimeout(() => { version++; render(); }, due + 50);
 
-  // Why the list is empty, said once: no link (the top line says it), the phone not heard from yet, or too little.
+  // Why the list is empty, said once: no link (the top line says it), the phone not heard from yet, or too little. A
+  // row needs about 30 minutes of one use, added up over the span (ROW_HOURS), not 30 minutes off the charger (L).
   const list = heard ? rows(inWindow) : [];
-  renderList(list, heard ? 'Not enough readings yet: about 30 minutes off the charger'
+  renderList(list, heard ? 'Not enough readings yet: each use needs about 30 minutes in all'
     : linkUp() && asked ? "Waiting for your phone's readings" : '');
   renderChart(inWindow, windowMs, G, bandOld);
   setText($('span'), span === 'day' ? 'Last 24 hours' : 'Last 7 days');
@@ -782,6 +864,8 @@ function level(el, value, charging, old) {
 
 function renderList(list, empty) {
   setHidden($('notCounted'), !list.length);
+  // With no rows and nothing to say (no link: the top line says it), the heading goes too, so it heads nothing (G).
+  setHidden($('usesHead'), !list.length && !empty);
   const sig = list.length ? JSON.stringify(list) : `-${empty}`;
   if (sig === listDrawn) return;
   listDrawn = sig;
@@ -809,6 +893,8 @@ function renderList(list, empty) {
 // One line per device; it breaks where the readings stop being continuous: a level unknown or without the glasses for
 // over 30 minutes, or a jump of more than 2 points (an overnight gap with the phone off). The phone writes a reading
 // only when something changes, so a long time with no reading and no jump is a level that held, and stays joined.
+// A reading alone (often the level now, after a break) is a 3 px dot: the 4 px tick drawn before read as one of the
+// band's dashes (Photographer recheck 3). Returns the line and the dots, each a path.
 function linePath(readings, valueOf, current, t0, end, xOf, yOf) {
   const segs = [];
   let seg = null;
@@ -828,10 +914,14 @@ function linePath(readings, valueOf, current, t0, end, xOf, yOf) {
     else unseen = true;
   }
   if (current != null) add(end, current); // carried to now, at the level shown above
-  return segs.map((s) => {
-    if (s.length === 1) s.unshift([Math.max(0, s[0][0] - 4), s[0][1]]); // a reading alone: a short tick
-    return `M${s.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}`;
-  }).join('');
+  const line = [];
+  const dots = [];
+  for (const s of segs) {
+    const pts = s.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`);
+    if (pts.length === 1) dots.push(`M${pts[0]}L${pts[0]}`); // drawn by its round cap
+    else line.push(`M${pts.join('L')}`);
+  }
+  return { line: line.join(''), dots: dots.join('') };
 }
 
 function renderChart(readings, windowMs, G, bandOld) {
@@ -846,8 +936,15 @@ function renderChart(readings, windowMs, G, bandOld) {
   // Each line runs to now only when the level above is news.
   const gNow = G.value >= 0 && !G.old ? G.value : null;
   const bNow = phone && phone.b >= 0 && !bandOld ? phone.b : null;
-  setAttr($('lineGlasses'), 'd', linePath(readings, (r) => (r.c === false ? -1 : r.g), gNow, t0, end, xOf, yOf));
-  setAttr($('lineBand'), 'd', linePath(readings, (r) => (r.b >= 0 && !(r.bt > 0 && r.at - r.bt > BAND_STALE) ? r.b : -1), bNow, t0, end, xOf, yOf));
+  const g = linePath(readings, (r) => (r.c === false ? -1 : r.g), gNow, t0, end, xOf, yOf);
+  const b = linePath(readings, (r) => (r.b >= 0 && !(r.bt > 0 && r.at - r.bt > BAND_STALE) ? r.b : -1), bNow, t0, end, xOf, yOf);
+  setAttr($('lineGlasses'), 'd', g.line);
+  setAttr($('dotsGlasses'), 'd', g.dots);
+  setAttr($('lineBand'), 'd', b.line);
+  setAttr($('dotsBand'), 'd', b.dots);
+  // The legend names a device only when something of it is drawn (Director recheck 1-3, G).
+  setHidden($('keyGlasses'), !g.line && !g.dots);
+  setHidden($('keyBand'), !b.line && !b.dots);
   // When less than the span is held (a short history, or an answer cut at the most a message carries), the left label
   // says when the readings start, with the day when it is not today.
   setText($('since'), readings.length && t0 > end - windowMs ? when(t0) : (span === 'day' ? '24 h ago' : '7 days ago'));
@@ -855,8 +952,8 @@ function renderChart(readings, windowMs, G, bandOld) {
 }
 
 // ---- visits and timers --------------------------------------------------------------------------------
-// No steady tick: one timeout for the moment the phone counts as not answering, one for calm, and none while calm with
-// nothing asked.
+// No steady tick: one timeout for the moment the phone counts as not answering or the link as down, one for calm, and
+// none while calm with nothing asked and the link up.
 
 function schedule() {
   clearTimeout(tickTimer);
@@ -865,6 +962,7 @@ function schedule() {
   const now = Date.now();
   const due = [];
   if (asked && now - asked <= ANSWER_WAIT) due.push(asked + ANSWER_WAIT + 20);
+  if (downAt && !linkUp() && now - downAt <= ANSWER_WAIT) due.push(downAt + ANSWER_WAIT + 20);
   if (!document.body.classList.contains('calm')) due.push(lastInputAt + CALM_AFTER + 20);
   if (!due.length) return;
   tickTimer = setTimeout(() => {
@@ -893,6 +991,7 @@ function onVisibility() {
     clearInterval(askTimer);
     clearTimeout(tickTimer);
     clearTimeout(ageTimer);
+    clearTimeout(levelTimer);
     asked = 0;
     request = null;
     answeredAt = 0;

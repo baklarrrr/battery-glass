@@ -21,9 +21,16 @@ P     The Photographer's recheck 1 (recheck-1\\photographer\\NOTES.md), must-fix
       P-C check (the Photographer's S05 side effect) is a guard that passes on both.
 R, H  The Director's recheck 2 (recheck-2\\director\\NOTES.md). R: must-fix A2, "At this pace" only from the level
       changes since the situation last changed, with the readings of its scripts\\recheck2_harness.py (c_r2 from
-      90.5%, c_r2h, c_r1); R2e, R2f, R2h6, R2d and R1 fail on 3b127b9. H: should-fix H, the link's retries back off as
+      90.5%, c_r2h, c_r1); R2e, R2f, R2h6, R2d and R1 failed on 3b127b9. H: should-fix H, the link's retries back off as
       Tidal Glass build 17's (its webapp\\tests\\link_test.py check 7) and stop while hidden; fails on 3b127b9. With A2,
       D2 and the first since-reconnect check changed on purpose, and D11 changed with the unlinked hint; each says why.
+      With recheck 3's A3, R2e (6 minutes in) changed on purpose and its time check moved to R2e8 (8 minutes in), and
+      R2h6 moved to R2h8; each says why.
+3     The Director's recheck 3 (recheck-3\\director\\NOTES.md: A3, L; C, E, F and G carried from recheck 2) and the
+      Photographer's recheck 3 (recheck-3\\photographer\\NOTES.md: S1-S3 and the "now" mark). Every check in this
+      section fails on 3af1600. Changed on purpose with them, each saying why: D11 (the hint names the phone's button
+      again), 4, D5 and N11 (the row names "Follow my voice" and "Tidal playing"), 8 (calm dims the list's names and
+      rates, not the whole list), D7 (the list's message), D10 (charging: a time for 80%), D5 files (cache v4).
 Text is drawn in greyscale (--disable-lcd-text), as the glasses draw it, so the captures carry no colour fringes.
 """
 import json
@@ -31,6 +38,7 @@ import math
 import os
 import re
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -330,12 +338,15 @@ with sync_playwright() as p:
     check("1 without a pairing the page says how it gets linked",
           pg.evaluate("!document.getElementById('unpaired').hidden && document.getElementById('main').hidden"))
     hint = pg.evaluate("document.querySelector('#unpaired .hint').textContent")
-    # Changed on purpose (coordinator, 2026-10-25): the installed phone build (18:59) has no "Put Battery on my glasses"
-    # button; on it Battery is added from the Tidal Glass app's "Add Battery to your glasses" notification, which the
-    # coordinator sends. So the hint names only what both builds have, as live 20bc2c3 did. The button's name can come
-    # back after the next phone install (README).
-    check("D11 the unlinked screen's hint is true on both phone builds: added from the Tidal Glass app, no button only "
-          "the next build has", hint == "It is added from the Tidal Glass app on your phone, which links it.", hint)
+    hint_lines = pg.evaluate("""() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('#unpaired .hint'));
+        return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size; }""")
+    # Changed on purpose again (coordinator, 2026-10-26): the phone build installed 2026-10-26 00:04 has the "Put Battery
+    # on my glasses" button (MainActivity.kt), so the hint names it, as the README said it could after that install.
+    # The example wording "On your phone, open the Tidal Glass app and tap ..." takes two lines at 17 px, so it is
+    # shortened to stay on one line (the Photographer's recheck 1 note on the split hint).
+    check("D11 the unlinked screen's hint names the phone app's button, on one line",
+          hint == "On your phone, tap “Put Battery on my glasses” in Tidal Glass." and hint_lines == 1,
+          [hint, hint_lines])
     shot(pg, "1-unpaired")
     close(pg)
 
@@ -364,10 +375,11 @@ with sync_playwright() as p:
     g_pts = path_pts(v["gPath"])
     b_pts = path_pts(v["bPath"])
     # Wording changed on purpose (Director items 2, 5, 11): the time left is a clock time ("... around ..."), the top
-    # row is "Follow my voice (glasses mic on)" (was "Worn, Quran listening"), and the lines are paths that can break
-    # (were polylines), so their points are read from `d`.
+    # row is Follow my voice (was "Worn, Quran listening"), and the lines are paths that can break (were polylines), so
+    # their points are read from `d`. Changed again on purpose (Director recheck 1-3, G): the row is "Follow my voice",
+    # without "(glasses mic on)": the phone listens through its own microphone when it cannot reach the glasses'.
     ok4 = (v["glasses"] == f"{last['g']}%" and v["band"] == f"{last['b']}%" and "around" in v["left"]
-           and v["rows"] and v["rows"][0].startswith("Follow my voice (glasses mic on)") and len(g_pts) > 50 and len(b_pts) > 50
+           and v["rows"] and v["rows"][0].startswith("Follow my voice |") and len(g_pts) > 50 and len(b_pts) > 50
            and v["state"].startswith("From your phone") and max(y for _, y in g_pts) < 90)
     check("4 the answer draws both levels, the time left, how fast they drain (highest first) and both lines, never a 0% that was only unknown", ok4, json.dumps(v)[:500])
 
@@ -405,9 +417,11 @@ with sync_playwright() as p:
     check("7 the span button asks again for 7 days", bool(ok7), json.dumps(reqs)[:200])
 
     # 8. calm
+    # Changed on purpose (Photographer recheck 3, S2): calm dims the list's names and rates, not the whole list box (its
+    # grey text keeps its strength), so the check reads how strongly a rate is drawn.
     pg.evaluate("lastInputAt = Date.now() - 16000; checkCalm()")
     calm = pg.evaluate("""() => [document.body.classList.contains('calm'),
-        getComputedStyle(document.querySelector('.uses')).opacity, getComputedStyle(document.querySelector('#glasses .pct')).opacity]""")
+        __eff('.list .rate'), getComputedStyle(document.querySelector('#glasses .pct')).opacity]""")
     check("8 calm dims the details, never the levels", calm[0] and float(calm[1]) < 1 and float(calm[2]) == 1, calm)
     close(pg)
 
@@ -598,8 +612,10 @@ with sync_playwright() as p:
         s.run(12, 10)
         answer(pg, s.now(), s.out)
         v = view(pg)
-        ok = v["rows"] == ["Not enough readings yet: about 30 minutes off the charger"] and not v["notCounted"]
-        check("D7 answered with too few readings: \"Not enough readings yet: about 30 minutes off the charger\"", ok, v)
+        # Changed on purpose (Director recheck 3, L): a row needs about 30 minutes of one use, added up, not 30 minutes
+        # off the charger; the old words stayed up long after they were met. L below checks the real rule.
+        ok = v["rows"] == ["Not enough readings yet: each use needs about 30 minutes in all"] and not v["notCounted"]
+        check("D7 answered with too few readings: \"Not enough readings yet: each use needs about 30 minutes in all\"", ok, v)
         close(pg)
 
     def case_normal_day():
@@ -610,11 +626,13 @@ with sync_playwright() as p:
         v = view(pg)
         rows = v["rows"]
         names = [r.split(" | ")[0] for r in rows]
-        expect = {"Follow my voice (glasses mic on)": 22, "Tidal Glass open": 16, "Music playing": 13,
+        # Changed on purpose (Director recheck 1-3, E and G): "Tidal playing" (was "Music playing": the phone sees
+        # Tidal's own playing only) and "Follow my voice" (was "... (glasses mic on)": the phone may use its own mic).
+        expect = {"Follow my voice": 22, "Tidal Glass open": 16, "Tidal playing": 13,
                   "Sound Lab open": 12, "Worn, anything else": 9, "Not worn": 2}
         ok_rows = all(near(rate_of(rows, k), val, 2 if val > 5 else 1) for k, val in expect.items())
         check("D5 six situations, named for what the phone sees, in whole numbers, highest first",
-              ok_rows and names[0] == "Follow my voice (glasses mic on)" and not any("." in r.split(" | ")[-1] for r in rows), rows)
+              ok_rows and names[0] == "Follow my voice" and not any("." in r.split(" | ")[-1] for r in rows), rows)
         check("D5 the heading is \"How fast they drain\" with one dim line on what is not counted",
               v["heading"] == "How fast they drain" and v["notCounted"]
               and pg.evaluate("document.getElementById('notCounted').textContent") == "Not counted: Meta's apps, brightness, and Quran Glass outside Follow my voice.",
@@ -731,12 +749,15 @@ with sync_playwright() as p:
         charge(s, 33, 1.2)                # 50 %/h for 40 minutes
         answer(pg, now_of(s), s.out)
         v = view(pg)
-        full = int(v["leftData"].get("full", "0"))
-        expected = s.t + (100 - s.now()["g"]) / 50 * HOUR
+        # Changed on purpose (Director recheck 1-3, F): the line says when they reach 80% (was "Full around", a straight
+        # line to 100%): a charge slows near full by an amount not measured on these glasses. F below checks above 80%.
+        charged = int(v["leftData"].get("charged", "0"))
+        expected = s.t + (80 - s.now()["g"]) / 50 * HOUR
         times = pg.evaluate("document.getElementById('main').innerText.split('Charging').length - 1")
-        ok = (v["glassesNote"] == "Charging" and v["left"].startswith("Full around ") and abs(full - expected) < 8 * MIN
-              and times == 1 and all(m % 5 == 0 for m in clock_minutes(v["left"])))
-        check("D10 charging: \"Charging\" once, and the line under it says when they will be full", ok, [v["glassesNote"], v["left"], times, (full - expected) / MIN])
+        ok = (v["glassesNote"] == "Charging" and v["left"].startswith("80% around ") and abs(charged - expected) < 8 * MIN
+              and times == 1 and all(m % 5 == 0 for m in clock_minutes(v["left"])) and "Full" not in v["left"])
+        check("D10 charging: \"Charging\" once, and the line under it says when they reach 80%", ok,
+              [v["glassesNote"], v["left"], times, (charged - expected) / MIN])
         shot(pg, "4-charging")
         close(pg)
 
@@ -839,9 +860,10 @@ with sync_playwright() as p:
         html = fetch("index.html")
         manifest = json.loads(fetch(".well-known/meta-wearables-manifest.json"))
         sw = fetch("sw.js")
+        # Changed on purpose with each release: v4 with this round (live is v3), so the glasses drop the old copy.
         ok = ("and how fast they drain" in html and "When acting for the wearer" not in html
-              and "and how fast they drain" in manifest["description"] and "const CACHE = 'battery-glass-v3';" in sw)
-        check("D5 the page and launcher descriptions say \"how fast they drain\"; no instruction in the description; cache v3", ok)
+              and "and how fast they drain" in manifest["description"] and "const CACHE = 'battery-glass-v4';" in sw)
+        check("D5 the page and launcher descriptions say \"how fast they drain\"; no instruction in the description; cache v4", ok)
 
     for name, fn in [("D7 no link", case_no_link), ("D7 not enough", case_not_enough), ("D normal day", case_normal_day),
                      ("D6 saved and own", case_saved_and_own), ("D10 charging", case_charging), ("D2 low", case_low),
@@ -867,9 +889,10 @@ with sync_playwright() as p:
         v = view(pg)
         low, empty = true_targets(s.t, s.level, 22)
         got_low, got_empty = int(v["leftData"].get("low", "0")), int(v["leftData"].get("empty", "0"))
+        # The row's name changed on purpose (Director recheck 1-3, G): "Follow my voice".
         ok = (v["left"].startswith("At this pace: 20% around ") and " · empty around " in v["left"]
               and abs(got_low - low) < 10 * MIN and abs(got_empty - empty) < 10 * MIN
-              and near(rate_of(v["rows"], "Follow my voice (glasses mic on)"), 22, 2))
+              and near(rate_of(v["rows"], "Follow my voice"), 22, 2))
         check("N11 95 min off the face, then 44 min of Follow my voice: the time left is at this pace, within 10 minutes "
               "of the truth at 22% an hour (bccfc7c: 3-4 hours late)",
               ok, [v["left"], (got_low - low) / MIN, (got_empty - empty) / MIN, v["rows"]])
@@ -1102,17 +1125,29 @@ with sync_playwright() as p:
         check(name, ok, [v["left"], (got_low - low) / MIN, (got_empty - empty) / MIN])
 
     def case_r2e():
-        r_times("R2e 6 min of Tidal Glass with music at 30% an hour after 2 h off the face, the last slow change 15 min "
+        # Changed on purpose (Director recheck 3, A3): 6 minutes in, the 3 changes since the switch span 4 minutes, under
+        # the 5 that "At this pace" now needs, so the line falls back and says what it measures, as in R2d (the Director
+        # accepted that the fallback stays up a little longer after a real switch). It is still never a blend called
+        # "this pace", which 3b127b9 showed here. The time check moved to R2e8, 8 minutes in.
+        _, v = r_view(lambda now_ms: r2_day(now_ms, 6))
+        check("R2e the same switch 6 min in, 3 changes over 4 minutes: no \"At this pace\" yet, and the line says which "
+              "pace it uses (3b127b9: \"At this pace\", about 5 hours late)",
+              "At this pace" not in v["left"] and v["left"].startswith("At the pace since unplugging: "), v["left"])
+
+    def case_r2e8():
+        r_times("R2e8 8 min of Tidal Glass with music at 30% an hour after 2 h off the face, the last slow change 15 min "
                 "before the switch: \"At this pace\" is the music's pace, 20% and empty within 10 minutes of the truth "
-                "(3b127b9: about 5 and 6.5 hours late)", lambda now_ms: r2_day(now_ms, 6), 30, "R2e-at-this-pace-after-switch")
+                "(R2e's time check, moved from 6 minutes in)", lambda now_ms: r2_day(now_ms, 8), 30, "R2e-at-this-pace-after-switch")
 
     def case_r2f():
         r_times("R2f the same switch 10 min in: \"At this pace\" within 10 minutes of the truth at 30% an hour "
                 "(3b127b9: about 3 and 4 hours late)", lambda now_ms: r2_day(now_ms, 10), 30)
 
-    def case_r2h6():
-        r_times("R2h6 real-like rates, an hour off at 25% then 6 min of Tidal Glass with music at 50% an hour: \"At this "
-                "pace\" within 10 minutes of the truth (3b127b9: about 39 and 54 minutes late)", lambda now_ms: r2h_day(now_ms, 6), 50)
+    def case_r2h8():
+        # Moved on purpose from R2h6 (Director recheck 3, A3): 6 minutes in, the changes since the switch span about 5
+        # minutes, right at the edge of what "At this pace" now needs, so the check moved to 8 minutes in.
+        r_times("R2h8 real-like rates, an hour off at 25% then 8 min of Tidal Glass with music at 50% an hour: \"At this "
+                "pace\" within 10 minutes of the truth (was R2h6, 6 minutes in)", lambda now_ms: r2h_day(now_ms, 8), 50)
 
     def case_r2d():
         _, v = r_view(lambda now_ms: r2_day(now_ms, 4), "R2d-fallback-after-switch")
@@ -1151,8 +1186,8 @@ with sync_playwright() as p:
               "then up to 30 s, 10 min while another broker works), and a hidden page's closed link tries nothing",
               ok, [d, opts, tried, hidden])
 
-    for name, fn in [("R2e", case_r2e), ("R2f", case_r2f), ("R2h6", case_r2h6), ("R2d", case_r2d), ("R1", case_r1),
-                     ("H", case_retries)]:
+    for name, fn in [("R2e", case_r2e), ("R2e8", case_r2e8), ("R2f", case_r2f), ("R2h8", case_r2h8), ("R2d", case_r2d),
+                     ("R1", case_r1), ("H", case_retries)]:
         guarded(name, fn)
 
     # ---- P: the Photographer's recheck 1 ----------------------------------------------------------------------
@@ -1231,6 +1266,337 @@ with sync_playwright() as p:
               b[0].startswith("Uses ") and b[1] <= b[2] < 1, b)
 
     for name, fn in [("P-A", case_calm_warning), ("P-B", case_bars), ("P-C", case_age_note)]:
+        guarded(name, fn)
+
+    # ---- 3: the Director's and the Photographer's recheck 3 ------------------------------------------------------
+    # Made-up readings shaped like the patterns the reviewers saw in real ones; no real reading is in this file. Every
+    # check here fails on 3af1600.
+
+    def saved_page(saved, connect=False):
+        """A launch with this copy kept on the glasses (as save() writes it), in place before the page runs."""
+        ctx = new_context()
+        ctx.add_init_script("(() => { try { localStorage.setItem(%s, %s); } catch (e) {} })();"
+                            % (json.dumps("bg.last.bgtest"), json.dumps(json.dumps(saved))))
+        return page_at(URL, ctx=ctx, connect=connect)
+
+    def kept_copy(age_ms, rate, minutes):
+        """The copy an answer age_ms ago left on the glasses: unplugged, then `minutes` of Tidal Glass with Tidal
+        playing at `rate` an hour, and the phone's word then."""
+        end = int(time.time() * 1000) - age_ms
+        s = Sim(end - (minutes + 1) * MIN, 100.0, band=85.0, band_rate=1.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", a="tidal", p=True)
+        s.run(minutes, rate)
+        return s, {"at": s.t, "now": now_of(s), "h": s.out, "heldFrom": s.out[0]["at"], "heldAll": False}
+
+    def visible_key(pg):
+        """The legend's names as drawn: hidden entries left out, spaces dropped ("GlassesBand", "Glasses", "")."""
+        return re.sub(r"\s+", "", pg.evaluate("document.querySelector('.key').innerText"))
+
+    def case_a3_blips():
+        # A3 (1): off-the-face blips of a few seconds while Tidal Glass stays open, the last 2 minutes before the answer.
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        blips = (2, 6, 1, 10, 3)
+        s = Sim(now_ms - (1 + 5 * 6.5 + 2) * MIN - sum(blips) * 1000, 90.0, band=85.0, band_rate=0.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", a="tidal")
+        for secs in blips:
+            s.run(6.5, 50)                 # Tidal Glass, 50 %/h
+            s.set(w="DOFFED")
+            s.t += secs * 1000
+            s.set(w="DONNED")
+        s.run(2, 50)
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        low, empty = true_targets(s.t, s.level, 50)
+        got_low, got_empty = int(v["leftData"].get("low", "0")), int(v["leftData"].get("empty", "0"))
+        ok = (v["left"].startswith("At this pace: 20% around ") and abs(got_low - low) < 10 * MIN
+              and abs(got_empty - empty) < 10 * MIN)
+        check("A3 off-the-face blips of a few seconds do not start \"At this pace\" again: 2 minutes after the last one it "
+              "is still the pace of the last 30 minutes, within 10 minutes of the truth (3af1600: a fallback after each blip)",
+              ok, [v["left"], (got_low - low) / MIN, (got_empty - empty) / MIN])
+        shot(pg, "A3-blips-at-this-pace")
+        close(pg)
+
+    def case_a3_quick():
+        # A3 (2): three changes the phone saw within 100 s of opening Tidal Glass do not set the pace alone.
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - (1 + 40) * MIN - 150_000, 90.0, band=85.0, band_rate=0.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING")
+        s.run(40, 30)                      # worn, nothing open: 30 %/h
+        s.set(a="tidal")
+        g = s.shown_g
+        for secs, k in ((10, 1), (40, 2), (100, 3)):
+            s.out.append({**s.out[-1], "at": s.t + secs * 1000, "g": g - k})
+        s.t += 150_000
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        check("A3 three changes within 100 s of opening Tidal Glass do not set \"At this pace\" (they span under 5 "
+              "minutes); the line says which pace it uses (3af1600: \"At this pace\" at 80% an hour)",
+              "At this pace" not in v["left"] and v["left"].startswith("At the pace since unplugging: "), v["left"])
+        close(pg)
+
+    def case_l():
+        # L: 45 minutes off the charger, Tidal Glass opened and closed every 9 minutes, so no use has 30 minutes yet.
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - 46 * MIN, 80.0, band=85.0, band_rate=0.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING")
+        for i in range(5):
+            s.set(a="tidal" if i % 2 == 0 else "")
+            s.run(9, 40)
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        check("L 45 minutes off the charger with Tidal Glass opened and closed every 9 minutes: the list's message gives "
+              "the real rule, \"each use needs about 30 minutes in all\" (3af1600: \"about 30 minutes off the charger\", "
+              "already past)", v["rows"] == ["Not enough readings yet: each use needs about 30 minutes in all"], v["rows"])
+        shot(pg, "L-each-use")
+        close(pg)
+
+    def case_c_old():
+        # C: the copy kept on the glasses is 50 minutes old (40% then, at 40% an hour); no link, no own reading.
+        s, saved = kept_copy(50 * MIN, 40, 90)
+        pg = saved_page(saved)
+        pg.wait_for_timeout(400)
+        v = view(pg)
+        when = clock_of(pg, saved["at"])
+        close(pg)
+        check("C a copy 50 minutes old gives no time line (it would be worked out from a level that old), and the top "
+              "line dates it (3af1600: a time for tonight from the old level)",
+              v["left"] == "" and v["state"] == f"Connecting to your phone… · levels from {when}", [v["left"], v["state"]])
+
+    def case_c_young():
+        # C: a copy 20 minutes old is worked out from its own time: had the use gone on, the times are those.
+        s, saved = kept_copy(20 * MIN, 40, 90)
+        pg = saved_page(saved)
+        pg.wait_for_timeout(400)
+        v = view(pg)
+        shot(pg, "C-copy-20min")
+        close(pg)
+        low, empty = true_targets(s.t, s.level, 40)
+        got_low = int(v["leftData"].get("low", "0"))
+        check("C a copy 20 minutes old is worked out from the time of the phone's word, within 5 minutes of where that "
+              "pace leads, not from now (3af1600: about 18 minutes later)",
+              v["left"].startswith("At this pace: ") and abs(got_low - low) < 5 * MIN, [v["left"], (got_low - low) / MIN])
+
+    def case_c_turns_old():
+        # C: on screen, the line goes when the phone's level turns 30 minutes old, with nothing else new.
+        s, saved = kept_copy(30 * MIN - 6000, 20, 90)
+        pg = saved_page(saved)
+        pg.wait_for_timeout(300)
+        before = view(pg)["left"]
+        pg.wait_for_timeout(7000)          # past 30 minutes, before the 12 s mark that redraws for "not answering"
+        after = view(pg)["left"]
+        close(pg)
+        check("C the time line goes once the level it is worked out from turns 30 minutes old, while on screen "
+              "(3af1600: it stays)", before.startswith("At this pace: ") and after == "", [before, after])
+
+    def case_e():
+        # E: an hour of Tidal playing, 20 minutes of nothing, then Tidal playing again for 3 minutes.
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - (1 + 60 + 20 + 3) * MIN, 95.0, band=85.0, band_rate=0.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", p=True)
+        s.run(60, 13)
+        s.set(p=False)
+        s.run(20, 9)
+        s.set(p=True)
+        s.run(3, 13)
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        shot(pg, "E-tidal-playing")
+        close(pg)
+        ok = (near(rate_of(v["rows"], "Tidal playing"), 13, 2) and not any("Music" in r for r in v["rows"])
+              and v["left"].endswith(" if Tidal keeps playing"))
+        check("E Tidal's own playing is called \"Tidal playing\", in the list and in \"... if Tidal keeps playing\" "
+              "(3af1600: \"Music playing\", \"if the music keeps playing\")", ok, [v["rows"], v["left"]])
+
+    def case_f_above():
+        # F: charging at 85%: no time, since a charge slows near full by an amount not measured here.
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = normal_day(now_ms - 60 * MIN)
+        s.set(w="DOFFED")
+        charge(s, 50, 1.2)                 # 50 %/h for an hour
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        shot(pg, "F-charging-85")
+        close(pg)
+        check("F charging above 80%: \"Charging\", and no time (3af1600: \"Full around ...\" on a straight line)",
+              s.now()["g"] > 80 and v["glassesNote"] == "Charging" and v["left"] == "" and v["leftData"] == {},
+              [s.now()["g"], v["glassesNote"], v["left"], v["leftData"]])
+
+    def case_g_band():
+        # G (1): the phone's newer reasons for an unknown band, each on one line, with nothing below moving.
+        seen = []
+        for code, words in (("bt-off", "Bluetooth is off on your phone"), ("not-read-yet", "Not read yet"),
+                            ("out-of-range", "Your phone can't reach it")):
+            pg = page_at(URL, connect=True)
+            s = normal_day(pg.evaluate("Date.now()"))
+            answer(pg, {**now_of(s), "b": -1, "bw": code}, [{**r, "b": -1} for r in s.out])
+            note = pg.evaluate("document.getElementById('bandNote').textContent")
+            m = pg.evaluate("""() => { const r = document.createRange(); r.selectNodeContents(document.getElementById('bandNote'));
+                return [new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size,
+                        document.getElementById('left').getBoundingClientRect().top]; }""")
+            if code == "bt-off":
+                shot(pg, "G-band-bt-off")
+            close(pg)
+            seen.append([code, note, m, note == words and m[0] == 1 and "left_top" in layout and abs(m[1] - layout["left_top"]) < 0.5])
+        check("G the band's newer reasons read \"Bluetooth is off on your phone\", \"Not read yet\" and \"Your phone can't "
+              "reach it\", each on one line, nothing below moving (3af1600: \"Not read yet\" for Bluetooth off, \"Out of "
+              "your phone's range\")", all(x[3] for x in seen), seen)
+
+    def case_g_voice():
+        # G (2): Follow my voice stopped 3 minutes ago; Quran Glass still counts as in use for 4 minutes after it.
+        pg = page_at(URL, connect=True)
+        now_ms = pg.evaluate("Date.now()")
+        s = Sim(now_ms - (1 + 40 + 3) * MIN, 90.0, band=85.0, band_rate=0.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", m=True, a="quran")
+        s.run(40, 22)                      # Follow my voice, 22 %/h
+        s.set(m=False)                     # stopped; a = "quran" stays
+        s.run(3, 10)
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        close(pg)
+        ok = (near(rate_of(v["rows"], "Follow my voice"), 22, 2) and "Follow my voice" not in v["left"]
+              and v["left"] != "" and not any("mic" in r for r in v["rows"]))
+        check("G Follow my voice counts only while the phone listens: 3 minutes after it stopped, with Quran Glass still "
+              "counted as in use, the line no longer says \"if Follow my voice stays on\"; the row is \"Follow my voice\" "
+              "(3af1600: both)", ok, [v["rows"], v["left"]])
+
+    def case_g_heading():
+        # G (3): no link and nothing kept: no heading over an empty list. Linked and waiting: the heading heads a message.
+        pg = page_at(URL, connect=False)
+        pg.wait_for_timeout(400)
+        a = pg.evaluate("[!!document.querySelector('.uses h2').offsetParent, document.querySelectorAll('#usesGlasses li').length]")
+        shot(pg, "G-no-link-nothing-kept")
+        close(pg)
+        pg = page_at(URL, connect=True)
+        b = pg.evaluate("[!!document.querySelector('.uses h2').offsetParent, document.getElementById('usesGlasses').textContent]")
+        close(pg)
+        check("G with no link and nothing kept there is no heading over the empty list; while waiting for the phone it "
+              "heads the message (3af1600: the heading over nothing)",
+              a == [False, 0] and b == [True, "Waiting for your phone's readings"], [a, b])
+
+    def case_g_legend():
+        # G (4): the legend names only the lines drawn.
+        seen = {}
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        seen["both drawn"] = visible_key(pg)
+        close(pg)
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, {**now_of(s), "b": -1, "bw": "no-battery-service"}, [{**r, "b": -1} for r in s.out])
+        seen["band never read"] = visible_key(pg)
+        close(pg)
+        pg = page_at(URL, connect=True)    # B05: a 3-hour-old copy of the levels and no readings
+        at = pg.evaluate("Date.now() - 3 * 3600000")
+        pg.evaluate("""async (at) => { await handle(await seal({ t: 'state', at, play: false, gb: 64, bb: 71 })); }""", at)
+        pg.wait_for_timeout(200)
+        seen["old copy, no readings"] = visible_key(pg)
+        close(pg)
+        check("G the legend names \"Band\" only with a band line and \"Glasses\" only with a glasses line (3af1600: both, "
+              "always)", seen == {"both drawn": "GlassesBand", "band never read": "Glasses", "old copy, no readings": ""}, seen)
+
+    def case_s1():
+        # S1: (a) the copy kept on the glasses, no link yet, calm: the top line that dates it keeps its strength.
+        _, saved = kept_copy(10 * MIN, 20, 90)
+        pg = saved_page(saved)
+        pg.wait_for_timeout(300)
+        pg.evaluate("lastInputAt = Date.now() - 16000; checkCalm()")
+        pg.wait_for_timeout(100)
+        a = pg.evaluate("""[document.body.classList.contains('calm'), document.getElementById('main').classList.contains('stale'),
+            document.getElementById('state').classList.contains('warn'), __eff('#state')]""")
+        close(pg)
+        # (b) Linked and answered, then every broker drops: "Reconnecting…" is plain at first, and after 12 s without a
+        # link it takes the warning look, which calm leaves at full strength.
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        pg.evaluate("window.__clients.forEach((c) => c.fire('close'))")
+        pg.wait_for_timeout(300)
+        b0 = pg.evaluate("[document.getElementById('stateText').textContent, document.getElementById('state').classList.contains('warn')]")
+        pg.wait_for_timeout(12500)
+        pg.evaluate("lastInputAt = Date.now() - 16000; checkCalm()")
+        pg.wait_for_timeout(100)
+        b1 = pg.evaluate("""[document.getElementById('stateText').textContent, document.getElementById('state').classList.contains('warn'),
+            getComputedStyle(document.getElementById('state')).color, __eff('#state'), document.body.classList.contains('calm')]""")
+        shot(pg, "S1-reconnecting-calm")
+        close(pg)
+        ok = (a == [True, True, False, 1] and b0[0].startswith("Reconnecting") and not b0[1]
+              and b1[0].startswith("Reconnecting") and b1[1] and b1[2] == AMBER and b1[3] == 1 and b1[4])
+        check("S1 in calm a top line dating the phone's last word keeps its strength, and a link down for 12 s turns "
+              "\"Reconnecting…\" into the amber warning (3af1600: 0.55 in calm; never amber without a request)", ok, [a, b0, b1])
+
+    def case_s2():
+        # S2: calm dims only the bright parts; grey text keeps its strength. And when stale, B05's list message does too.
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        pg.evaluate("lastInputAt = Date.now() - 16000; checkCalm()")
+        pg.wait_for_timeout(100)
+        grey = pg.evaluate("['.uses h2', '.list .over', '#notCounted', '#since', '.key'].map((q) => __eff(q))")
+        bright = pg.evaluate("['.list .what', '.list .rate', '#lineGlasses', '#lineBand'].map((q) => __eff(q))")
+        close(pg)
+        pg = page_at(URL, connect=True)
+        at = pg.evaluate("Date.now() - 3 * 3600000")
+        pg.evaluate("""async (at) => { await handle(await seal({ t: 'state', at, play: false, gb: 64, bb: 71 })); }""", at)
+        pg.wait_for_timeout(200)
+        pg.evaluate("asked = Date.now() - 13000; render()")
+        msg = pg.evaluate("[document.getElementById('usesGlasses').textContent, __eff('#usesGlasses .empty'), __eff('.uses h2')]")
+        close(pg)
+        ok = all(x == 1 for x in grey) and all(x < 1 for x in bright) and msg == ["Waiting for your phone's readings", 1, 1]
+        check("S2 calm and stale dim the bright parts only (names, rates, lines); grey text keeps its strength: the "
+              "heading, \"over\", the note under the list, the axis labels, the legend, a message in the list (3af1600: "
+              "all at 0.55)", ok, [grey, bright, msg])
+
+    def case_s3():
+        # S3: stale, the legend's swatches dim with their lines; its words keep their strength.
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        pg.evaluate("ask()")
+        pg.wait_for_timeout(100)
+        pg.evaluate("asked = Date.now() - 13000; render()")
+        a = pg.evaluate("""[document.getElementById('main').classList.contains('stale'),
+            [...document.querySelectorAll('.key .sw')].map((e) => __eff(e)), __eff('#lineGlasses'), __eff('#lineBand'), __eff('.key')]""")
+        close(pg)
+        check("S3 when the phone's word is stale the legend's swatches dim with their lines (3af1600: the swatches stay "
+              "bright)", a[0] and len(a[1]) == 2 and all(x < 1 for x in a[1]) and a[2] < 1 and a[3] < 1 and a[4] == 1, a)
+
+    def case_now_dot():
+        # The Photographer's "now" mark: a reading alone (here the glasses at 100% now, after the level jumped) is a
+        # 3 px dot, no longer a 4 px tick that reads as one of the band's dashes.
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, {**now_of(s), "g": 100}, s.out)
+        d = pg.evaluate("""() => { const el = document.getElementById('dotsGlasses'); if (!el) return null;
+            const cs = getComputedStyle(el); return [el.getAttribute('d'), cs.strokeWidth, cs.strokeLinecap,
+            document.getElementById('lineGlasses').getAttribute('d')]; }""")
+        close(pg)
+        pts = path_pts(d[0]) if d else []
+        ok = (bool(d) and len(pts) == 2 and pts[0] == pts[1] and pts[0][0] > 539 and pts[0][1] < 2 and d[1] == "3px"
+              and d[2] == "round" and not any(abs(x - 540) < 0.1 and y < 2 for x, y in path_pts(d[3])))
+        check("now a reading alone is drawn as a 3 px dot, not a tick on the line (3af1600: a 4 px tick)", ok, d)
+
+    for name, fn in [("A3 blips", case_a3_blips), ("A3 quick", case_a3_quick), ("L", case_l), ("C old", case_c_old),
+                     ("C young", case_c_young), ("C turns old", case_c_turns_old), ("E", case_e), ("F above", case_f_above),
+                     ("G band", case_g_band), ("G voice", case_g_voice), ("G heading", case_g_heading),
+                     ("G legend", case_g_legend), ("S1", case_s1), ("S2", case_s2), ("S3", case_s3), ("now dot", case_now_dot)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)

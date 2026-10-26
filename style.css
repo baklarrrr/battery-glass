@@ -82,17 +82,23 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 
 /* ---- chart and the one control ----------------------------------------------------------------------- */
 .foot { display: grid; gap: 8px; }
-.chart { inline-size: 100%; block-size: 80px; }
+.chart { inline-size: 100%; block-size: 80px; overflow: visible; } /* a dot at 100% is not cut at the top */
 .chart .mid { stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 6; }
 .chart .axis { stroke: var(--hair); stroke-width: 1; }
 .chart .line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
 .chart .line.glasses { stroke: var(--ink); }
 .chart .line.band { stroke: var(--dim); stroke-dasharray: 5 4; }
+/* A reading alone is a 3 px dot, drawn by the round cap of a path of no length. */
+.chart .dots { fill: none; stroke-width: 3; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.chart .dots.glasses { stroke: var(--ink); }
+.chart .dots.band { stroke: var(--dim); }
 .chartlabels { display: flex; justify-content: space-between; font-size: 14px; color: var(--dim); margin-block-end: 4px; }
 .footrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.key { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--dim); }
+/* The legend names only the lines drawn; each entry is hidden on its own. */
+.key { display: inline-flex; align-items: center; gap: 14px; font-size: 14px; color: var(--dim); }
+.key .k { display: inline-flex; align-items: center; gap: 8px; }
 .sw { display: inline-block; inline-size: 18px; block-size: 0; border-block-start: 2px solid var(--ink); }
-.sw.band { border-block-start: 2px dashed var(--dim); margin-inline-start: 6px; }
+.sw.band { border-block-start: 2px dashed var(--dim); }
 
 button {
   font: inherit;
@@ -107,14 +113,19 @@ button {
 button:focus-visible, button:focus { border-color: var(--ink); }
 
 /* ---- calm: less light while nobody is touching it ----------------------------------------------------------
-   After 15 s without input the details and outlines dim; the two levels, a low level and the "not answering" warning
-   never dim, and the focus ring rests: still white and thin, dimmer, never a glow. The first input wakes it. */
-body.calm .uses, body.calm .state:not(.warn), body.calm .chart, body.calm .chartlabels, body.calm .key { opacity: 0.55; }
+   After 15 s without input the bright details dim: the list's names and rates, the chart and the legend's swatches,
+   and the top line while it is news. Text already grey (the heading, "over", the note on what is not counted, the
+   axis labels, the legend's words, a message in the list) keeps its strength: dimmed again it fell to a tenth of
+   white (Photographer recheck 3, S2). The two levels, a low level, the warning and a top line dating the phone's last
+   word never dim (S1); the focus ring rests: still white and thin, dimmer, never a glow. The first input wakes it. */
+body.calm #main:not(.stale) .state:not(.warn), body.calm .list .what, body.calm .list .rate, body.calm .chart,
+body.calm .key .sw { opacity: 0.55; }
 body.calm button { border-color: rgba(255, 255, 255, 0.16); color: var(--dim); }
 body.calm button:focus, body.calm button:focus-visible { border-color: rgba(255, 255, 255, 0.5); }
 body.calm .level:not(.low) .fill { opacity: 0.6; }
 
-/* The phone's last word (not answering, no link, or an earlier visit): the time left, list and chart dim, and each
-   level from the phone dims on its own (.old), so the glasses' own reading stays bright; the amber top line is the
-   one bright thing (as in Tidal Glass). */
-#main.stale .left, #main.stale .uses, #main.stale .chart, #main.stale .chartlabels { opacity: 0.55; }
+/* The phone's last word (not answering, no link, or an earlier visit): the time left, the list's names and rates and
+   the chart dim, the legend's swatches with its lines (S3), and each level from the phone dims on its own (.old), so
+   the glasses' own reading stays bright; grey text keeps its strength (S2), and so does the top line that dates it,
+   amber once nothing has answered or the link has been down for 12 s (as in Tidal Glass). */
+#main.stale .left, #main.stale .list .what, #main.stale .list .rate, #main.stale .chart, #main.stale .key .sw { opacity: 0.55; }
