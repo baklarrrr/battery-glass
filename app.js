@@ -37,7 +37,7 @@ const LONG_GAP = 6 * HOUR; // two readings this far apart: a phone that was off
 const ROW_POINTS = 3; // a row in the list needs 3 points of fall measured over 30 minutes
 const ROW_HOURS = 0.5;
 const STRETCH_TICKS = 3; // the time left needs 3 changes of the level in the current stretch off the charger
-const PACE = 30 * MIN; // "At this pace": 3 or more of those changes in the last 30 minutes
+const PACE = 30 * MIN; // "At this pace": 3 or more of those changes since the situation last changed, in the last 30 minutes
 const BAND_FRESH = 30 * MIN; // a band level read longer ago than this says how old it is
 const BAND_STALE = 45 * MIN; // a reading whose band level was read longer before it is not drawn
 const GAP = 30 * MIN; // the chart's line breaks across time the phone could not vouch for, when longer than this
@@ -122,15 +122,41 @@ function linkUp() {
   return links.some((l) => l.connected);
 }
 
+// Retries are scheduled here, not by mqtt.js (reconnectPeriod 0), as in Tidal Glass build 17. Its link report of
+// 2026-10-25 20:08 showed a page left open without signal trying every broker about every 2 s for 8.5 minutes (205
+// tries to shiftr alone), which keeps the radio awake. Now: 1 s for the first three tries, then doubling to 30 s while
+// nothing is connected; a broker that keeps failing while another carries the link backs off to 10 min. A connect, a
+// network change ('online') or a visit that opens the link again starts it fast again (each opens fresh links). The
+// link closes when the page is hidden, and closing it clears every pending retry, so nothing is tried while hidden.
+function retryDelay(fails, othersUp) {
+  if (othersUp) return Math.min(600000, 1000 * 2 ** Math.min(fails, 10));
+  return fails <= 3 ? 1000 : Math.min(30000, 1000 * 2 ** (fails - 3));
+}
+
+function scheduleRetry(client) {
+  if (client.retryTimer || !links.includes(client) || client.connected) return;
+  client.fails = (client.fails || 0) + 1;
+  client.retryTimer = setTimeout(() => {
+    client.retryTimer = 0;
+    if (!links.includes(client) || client.connected) return;
+    try { client.reconnect(); } catch (e) { scheduleRetry(client); }
+  }, retryDelay(client.fails, linkUp()));
+}
+
+// Connect timeout 6 s (was 8 s), as Tidal Glass: the slowest successful connect the glasses reported was 4.1 s, and
+// every try that hangs costs the whole timeout before the next one.
 function openLink() {
   if (links.length || typeof mqtt === 'undefined') return;
   const id = toB64url(crypto.getRandomValues(new Uint8Array(6))).replace(/[-_]/g, 'x');
   for (const { url, ...extra } of BROKERS) {
     const client = mqtt.connect(url, {
       clientId: `bgg-${id}-${links.length}`, clean: true, keepalive: 45, protocolVersion: 4,
-      reconnectPeriod: 1500, connectTimeout: 8000, ...extra,
+      reconnectPeriod: 0, connectTimeout: 6000, ...extra,
     });
     client.on('connect', () => {
+      client.fails = 0;
+      clearTimeout(client.retryTimer);
+      client.retryTimer = 0;
       everLinked = true;
       client.subscribe([`bkr/${topic}/s`, `bkr/${topic}/bat`], { qos: 1 });
       // A broker that connects while a request is unanswered gets it too: the phone may be on that one only.
@@ -140,8 +166,8 @@ function openLink() {
     // A broker hands over its stored copy of the phone's state on subscribing, marked retained; what the phone
     // publishes while the page listens arrives unmarked.
     client.on('message', (t, payload, packet) => handle(new TextDecoder().decode(payload), !!(packet && packet.retain)));
-    client.on('close', render);
-    client.on('error', () => { /* mqtt.js reconnects by itself */ });
+    client.on('close', () => { render(); scheduleRetry(client); });
+    client.on('error', () => { /* a failed try ends in 'close', which schedules the next one */ });
     links.push(client);
   }
 }
@@ -150,7 +176,7 @@ function closeLink() {
   const old = links;
   links = [];
   everLinked = false;
-  for (const l of old) { try { l.end(true); } catch (e) { /* already closed */ } }
+  for (const l of old) { clearTimeout(l.retryTimer); try { l.end(true); } catch (e) { /* already closed */ } }
 }
 
 let requestBody = '';
@@ -503,15 +529,39 @@ function lostAt() {
   return at;
 }
 
+// What makes a change of situation for "At this pace": worn or not, the glasses app in use, Follow my voice and Tidal
+// playing. A field the installed phone build does not write (p) counts as off.
+function situationKey(r) {
+  return `${r.w}|${r.a || ''}|${!!r.m}|${!!r.p}`;
+}
+
+// When the situation last changed inside the stretch that ends the readings (its first reading is history[from]): the
+// time of the first reading after the change, or 0 when it held all through. When the phone's word now differs from the
+// last reading in worn, the app in use or Follow my voice (they come only with an answer), it changed after the
+// readings: Infinity. Tidal playing is taken from the readings only, because the phone's state messages carry Tidal's
+// raw playing, which blinks off between songs.
+function switchedAt(from) {
+  const last = history[history.length - 1];
+  if (phone && last) {
+    for (const k of ['w', 'a', 'm']) if (phone[k] !== undefined && last[k] !== undefined && phone[k] !== last[k]) return Infinity;
+  }
+  for (let i = history.length - 1; i > from; i--) {
+    if (situationKey(history[i]) !== situationKey(history[i - 1])) return history[i].at;
+  }
+  return 0;
+}
+
 // The line under the levels: when to charge, said as a clock time.
 // - Charging: when they will be full, from this charge's own readings.
 // - Otherwise from the current stretch off the charger, from one change of the level to another; it starts after the
 //   last reading that was charging, unknown or without the glasses, or where the readings break (a jump, a rise, 6 hours
 //   with no reading), so a top-up or a reconnect starts it again.
-//   - 3 changes or more in the last 30 minutes: the pace now, "At this pace: …".
-//   - Fewer (a slow drain, such as off the face): the pace over the whole stretch (3 changes at least), "At the pace
-//     since unplugging: …", or since the time it starts when it did not start at the charger.
-// - Until then, today's rate for what is going on now, said as such ("… if Tidal Glass stays open").
+//   - "At this pace: …" only from the changes since the situation last changed that are also in the last 30 minutes, 3
+//     at least, so it never blends two situations (Director recheck 2, A2).
+//   - Fewer: today's rate for what is going on now, when today's list has a row for it, said as such ("… if Tidal Glass
+//     stays open").
+//   - Else the pace over the whole stretch (3 changes at least), "At the pace since unplugging: …", or since the time it
+//     starts when it did not start at the charger. It can span a change of situation, and its label says what it is.
 function timeLine(G) {
   const none = { text: '' };
   if (!(G.value >= 0)) return none;
@@ -529,25 +579,27 @@ function timeLine(G) {
   }
   const { end } = measure(history, drainLevel, () => 'off');
   const changes = end ? end.changes : [];
-  const pace = rateOf(changes.filter((c) => c.at >= Date.now() - PACE));
-  const rate = pace || rateOf(changes);
-  if (rate) {
-    if (G.value > end.tick.level + 1) return none; // higher than the phone's last reading: charged since
-    // From the last change the level falls at this rate. A change overdue means it falls slower now, so it is taken as
-    // just about to change; the glasses' own reading, when it is ahead of the phone's, starts from now.
-    let at = Math.max(end.tick.at, Date.now() - HOUR / rate);
-    let level = end.tick.level;
-    if (G.value < level) {
-      at = Date.now();
-      level = G.value;
-    }
-    return pace ? targets(level, at, rate, { lead: 'At this pace', both: true })
-      : targets(level, at, rate, { lead: `At the pace ${since(end)}` });
-  }
+  const rate = rateOf(changes);
+  if (rate && G.value > end.tick.level + 1) return none; // higher than the phone's last reading: charged since
+  const paceFrom = Math.max(end ? switchedAt(end.from) : 0, Date.now() - PACE);
+  const pace = rateOf(changes.filter((c) => c.at >= paceFrom));
+  if (pace) return fromLastChange(G, end, pace, { lead: 'At this pace', both: true });
   const s = situation(current());
   const day = s && measure(withinDay(), drainLevel, situation).groups[s];
   if (day && day.points >= ROW_POINTS && day.hours >= ROW_HOURS) return targets(G.value, Date.now(), day.points / day.hours, { condition: IF_SAME[s] });
-  return none;
+  return rate ? fromLastChange(G, end, rate, { lead: `At the pace ${since(end)}` }) : none;
+}
+
+// From the stretch's last change the level falls at this rate. A change overdue means it falls slower now, so it is
+// taken as just about to change; the glasses' own reading, when it is ahead of the phone's, starts from now.
+function fromLastChange(G, end, rate, how) {
+  let at = Math.max(end.tick.at, Date.now() - HOUR / rate);
+  let level = end.tick.level;
+  if (G.value < level) {
+    at = Date.now();
+    level = G.value;
+  }
+  return targets(level, at, rate, how);
 }
 
 // What the stretch's pace is measured since: unplugging, when the reading just before it was on the charger; otherwise

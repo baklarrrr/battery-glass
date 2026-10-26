@@ -19,6 +19,11 @@ N, A  The Director's recheck 1 (reviews\\battery-glass-v1\\recheck-1\\director\\
 P     The Photographer's recheck 1 (recheck-1\\photographer\\NOTES.md), must-fix A-C: the warning keeps its strength
       in calm, each bar runs its whole column, and "Read 3 h ago" stays bright. These fail on bccfc7c; the second
       P-C check (the Photographer's S05 side effect) is a guard that passes on both.
+R, H  The Director's recheck 2 (recheck-2\\director\\NOTES.md). R: must-fix A2, "At this pace" only from the level
+      changes since the situation last changed, with the readings of its scripts\\recheck2_harness.py (c_r2 from
+      90.5%, c_r2h, c_r1); R2e, R2f, R2h6, R2d and R1 fail on 3b127b9. H: should-fix H, the link's retries back off as
+      Tidal Glass build 17's (its webapp\\tests\\link_test.py check 7) and stop while hidden; fails on 3b127b9. With A2,
+      D2 and the first since-reconnect check changed on purpose, and D11 changed with the unlinked hint; each says why.
 Text is drawn in greyscale (--disable-lcd-text), as the glasses draw it, so the captures carry no colour fringes.
 """
 import json
@@ -47,6 +52,7 @@ window.mqtt = { connect(url, opts) {
   const c = { url, opts, connected: false, sent: [],
     on(ev, fn) { (h[ev] = h[ev] || []).push(fn); return c; },
     subscribe() {}, publish(t, body) { c.sent.push(body); }, end() { c.connected = false; },
+    reconnect() { c.tries = (c.tries || 0) + 1; },
     fire(ev, ...a) {
       if (ev === 'connect') c.connected = true;
       if (ev === 'close') c.connected = false;
@@ -324,8 +330,12 @@ with sync_playwright() as p:
     check("1 without a pairing the page says how it gets linked",
           pg.evaluate("!document.getElementById('unpaired').hidden && document.getElementById('main').hidden"))
     hint = pg.evaluate("document.querySelector('#unpaired .hint').textContent")
-    check("D11 the unlinked screen points at the phone's step \"Put Battery on my glasses\"",
-          "Tidal Glass app" in hint and "Put Battery on my glasses" in hint, hint)
+    # Changed on purpose (coordinator, 2026-10-25): the installed phone build (18:59) has no "Put Battery on my glasses"
+    # button; on it Battery is added from the Tidal Glass app's "Add Battery to your glasses" notification, which the
+    # coordinator sends. So the hint names only what both builds have, as live 20bc2c3 did. The button's name can come
+    # back after the next phone install (README).
+    check("D11 the unlinked screen's hint is true on both phone builds: added from the Tidal Glass app, no button only "
+          "the next build has", hint == "It is added from the Tidal Glass app on your phone, which links it.", hint)
     shot(pg, "1-unpaired")
     close(pg)
 
@@ -619,10 +629,15 @@ with sync_playwright() as p:
         }""")
         check("D5 all six rows and the \"Not counted\" line fit above the chart, no name cut", fit["inside"] and fit["above"] and not fit["clipped"], fit)
         mins = clock_minutes(v["left"])
-        # Changed on purpose (Director recheck 1, A): the line now says which pace it uses ("At this pace: …").
-        check("D2 the time left is a clock time for 20% and for empty, at the pace now, rounded",
-              v["left"].startswith("At this pace: 20% around ") and " · empty around " in v["left"] and len(mins) == 2
-              and all(m % 5 == 0 for m in mins) and v["glassesNote"] == "", [v["left"], v["glassesNote"]])
+        # Changed on purpose (Director recheck 1, A): the line says which pace it uses. Changed again on purpose
+        # (Director recheck 2, A2): this day closes Sound Lab 2 minutes before the answer, so no level change has come
+        # since the situation changed, and "At this pace" would give Sound Lab's pace under a label that says it is
+        # the pace now (3b127b9 did). The line falls back to today's rate for what is going on now (worn, nothing
+        # open), said as such. The two-time "At this pace" line is checked in N11, R2e, R2f and R2h6.
+        check("D2 the time left is a clock time, rounded: Sound Lab closed 2 minutes ago, so not \"At this pace\" but "
+              "today's rate for being worn, \"... if you keep them on\"",
+              re.fullmatch(r"20% around \d{1,2}:\d{2}\W+[AP]M if you keep them on", v["left"] or "") is not None
+              and len(mins) == 1 and all(m % 5 == 0 for m in mins) and v["glassesNote"] == "", [v["left"], v["glassesNote"]])
         check("D4 the band's note is a whole number", re.fullmatch(r"Uses (about \d+|under \d+)% an hour", v["bandNote"] or "") is not None, v["bandNote"])
         layout["left_top"] = pg.evaluate("document.getElementById('left').getBoundingClientRect().top")
         shot(pg, "2-day")
@@ -948,9 +963,7 @@ with sync_playwright() as p:
         shot(pg, "13-since-unplugging")
         close(pg)
 
-    def case_since_reconnect():
-        pg = page_at(URL, connect=True)
-        now_ms = pg.evaluate("Date.now()")
+    def reconnect_day(now_ms):
         s = Sim(now_ms - (60 + 20 + 150) * MIN - 10_000, 100.0, band=92.0, band_rate=1.0)
         s.set(a="tidal")
         s.run(60, 18)
@@ -965,12 +978,34 @@ with sync_playwright() as p:
         s.emit()
         start = s.t
         s.run(150, 2)                      # not worn since, 2 %/h
+        return s, start
+
+    def case_since_reconnect():
+        pg = page_at(URL, connect=True)
+        s, start = reconnect_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        at = clock_of(pg, start)
+        # Changed on purpose (Director recheck 2, A2, in the coordinator's fallback order): fewer than 3 changes in the
+        # last 30 minutes, and today's list has a "Not worn" row (2% an hour over the 2 hours since the phone found them
+        # again), so today's rate for not worn comes before the stretch's pace. 3b127b9 said "At the pace since …" here;
+        # the variant below still reaches that line.
+        ok = (v["left"].startswith("20% around ") and v["left"].endswith(" if you leave them off")
+              and "unplugging" not in v["left"])
+        check("A after the phone lost the glasses and they stayed off: today's rate for not worn comes first, "
+              "\"... if you leave them off\", never since unplugging", ok, [v["left"], at])
+        close(pg)
+
+    def case_since_reconnect_put_on():
+        pg = page_at(URL, connect=True)
+        s, start = reconnect_day(pg.evaluate("Date.now()"))
+        s.set(w="DONNED")                  # put on just before the answer; no row today for being worn
         answer(pg, now_of(s), s.out)
         v = view(pg)
         at = clock_of(pg, start)
         ok = v["left"].startswith(f"At the pace since {at}: 20% around ") and "unplugging" not in v["left"]
-        check("A after the phone lost the glasses, the pace is said since the time it found them again, not since unplugging",
-              ok, [v["left"], at])
+        check("A after the phone lost the glasses, put on just before the answer with no row today for being worn: the "
+              "pace is said since the time the phone found them again, not since unplugging", ok, [v["left"], at])
         close(pg)
 
     def case_line_fits():
@@ -1001,7 +1036,123 @@ with sync_playwright() as p:
 
     for name, fn in [("N11", case_n11), ("N11r", case_n11r), ("N13", case_n13), ("N13 band", case_n13_band),
                      ("B gap", case_gap_keeps_quiet), ("A since unplugging", case_since_unplugging),
-                     ("A since reconnect", case_since_reconnect), ("A line fits", case_line_fits)]:
+                     ("A since reconnect", case_since_reconnect), ("A since reconnect, put on", case_since_reconnect_put_on),
+                     ("A line fits", case_line_fits)]:
+        guarded(name, fn)
+
+    # ---- R, H: the Director's recheck 2 -----------------------------------------------------------------------
+    # Must-fix A2: "At this pace" counts only the level changes since the situation last changed (worn or not, the
+    # glasses app in use, Follow my voice, Tidal playing) that are also in the last 30 minutes, 3 at least. The readings
+    # are those of recheck-2\director\scripts\recheck2_harness.py (c_r2 from 90.5%, c_r2h, c_r1), written with this
+    # file's Sim. The harness's Sim also writes p = false and the band's read time from the first reading; p is off until
+    # the switch either way, and the time line does not read the band.
+
+    def r2_day(now_ms, on_min):
+        """c_r2, start 90.5: 2 h off the face at 2% an hour (the last slow change 15 min before the switch), then
+        on_min of Tidal Glass with music at 30% an hour, still going."""
+        s = Sim(now_ms - (1 + 120 + on_min) * MIN, 90.5, band=85.0, band_rate=1.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", w="DOFFED")
+        s.run(120, 2)
+        s.set(w="DONNED", a="tidal", p=True)
+        s.run(on_min, 30)
+        return s
+
+    def r2h_day(now_ms, on_min):
+        """c_r2h, real-like rates: an hour off at 25% an hour, then on_min of Tidal Glass with music at 50%."""
+        s = Sim(now_ms - (1 + 60 + on_min) * MIN, 100.0, band=85.0, band_rate=5.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", w="DOFFED")
+        s.run(60, 25)
+        s.set(w="DONNED", a="tidal", p=True)
+        s.run(on_min, 50)
+        return s
+
+    def r1_day(now_ms, off_min):
+        """c_r1: an hour of Follow my voice at 22% an hour, then off the face for off_min at 3%."""
+        s = Sim(now_ms - (1 + 60 + off_min) * MIN, 95.0, band=85.0, band_rate=1.0)
+        s.set(gc="CHARGING")
+        s.t += 60_000
+        s.set(gc="NOT_CHARGING", w="DONNED", m=True)
+        s.run(60, 22)
+        s.set(w="DOFFED", m=False)
+        s.run(off_min, 3)
+        return s
+
+    def r_view(build, shot_name=None):
+        pg = page_at(URL, connect=True)
+        s = build(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        if shot_name:
+            shot(pg, shot_name)
+        close(pg)
+        return s, v
+
+    def r_times(name, build, rate, shot_name=None):
+        """At this pace, both times within 10 minutes of a level falling at `rate` from now, rounded to 5 minutes."""
+        s, v = r_view(build, shot_name)
+        low, empty = true_targets(s.t, s.level, rate)
+        got_low, got_empty = int(v["leftData"].get("low", "0")), int(v["leftData"].get("empty", "0"))
+        ok = (v["left"].startswith("At this pace: 20% around ") and " · empty around " in v["left"]
+              and abs(got_low - low) < 10 * MIN and abs(got_empty - empty) < 10 * MIN
+              and all(m % 5 == 0 for m in clock_minutes(v["left"])))
+        check(name, ok, [v["left"], (got_low - low) / MIN, (got_empty - empty) / MIN])
+
+    def case_r2e():
+        r_times("R2e 6 min of Tidal Glass with music at 30% an hour after 2 h off the face, the last slow change 15 min "
+                "before the switch: \"At this pace\" is the music's pace, 20% and empty within 10 minutes of the truth "
+                "(3b127b9: about 5 and 6.5 hours late)", lambda now_ms: r2_day(now_ms, 6), 30, "R2e-at-this-pace-after-switch")
+
+    def case_r2f():
+        r_times("R2f the same switch 10 min in: \"At this pace\" within 10 minutes of the truth at 30% an hour "
+                "(3b127b9: about 3 and 4 hours late)", lambda now_ms: r2_day(now_ms, 10), 30)
+
+    def case_r2h6():
+        r_times("R2h6 real-like rates, an hour off at 25% then 6 min of Tidal Glass with music at 50% an hour: \"At this "
+                "pace\" within 10 minutes of the truth (3b127b9: about 39 and 54 minutes late)", lambda now_ms: r2h_day(now_ms, 6), 50)
+
+    def case_r2d():
+        _, v = r_view(lambda now_ms: r2_day(now_ms, 4), "R2d-fallback-after-switch")
+        check("R2d the same switch 4 min in, only 2 changes since it: the line does not say \"At this pace\" "
+              "(3b127b9: \"At this pace\", 7.5 hours late)", "At this pace" not in v["left"], v["left"])
+
+    def case_r1():
+        seen = []
+        for off in (12, 25, 35):
+            _, v = r_view(lambda now_ms, off=off: r1_day(now_ms, off))
+            seen.append([off, v["left"]])
+        check("R1 an hour of Follow my voice, then taken off 12, 25 and 35 min ago: never \"At this pace\", so never a "
+              "blend under that label (3b127b9: the heavy pace at 12 min, a blend about 7 hours off at 25)",
+              all("At this pace" not in left for _, left in seen), seen)
+
+    # Should-fix H: Tidal Glass build 17's scheduled retries (its webapp\tests\link_test.py check 7), and none while
+    # hidden: the link closes 400 ms after the page is hidden, before a retry due 1 s after a close.
+    def case_retries():
+        pg = page_at(URL)
+        d = pg.evaluate("[1, 2, 3, 4, 5, 6, 8, 12].map((n) => retryDelay(n, false)).concat([retryDelay(2, true), retryDelay(12, true)])")
+        opts = pg.evaluate("window.__clients.map((c) => [c.opts.reconnectPeriod, c.opts.connectTimeout])")
+        pg.evaluate("window.__clients[0].fire('close')")     # a failed try with nothing connected: the next 1 s later
+        pg.wait_for_timeout(1300)
+        tried = pg.evaluate("window.__clients[0].tries || 0")
+        pg.evaluate("window.__clients[1].fire('close')")     # a retry now due in 1 s, then the page is hidden
+        pg.evaluate("""() => {
+            Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+            document.dispatchEvent(new Event('visibilitychange'));
+        }""")
+        pg.wait_for_timeout(1500)
+        hidden = pg.evaluate("[links.length, window.__clients.map((c) => c.tries || 0), window.__clients.length]")
+        close(pg)
+        ok = (d == [1000, 1000, 1000, 2000, 4000, 8000, 30000, 30000, 4000, 600000] and opts == [[0, 6000]] * 3
+              and tried == 1 and hidden == [0, [1, 0, 0], 3])
+        check("H retries back off as Tidal Glass build 17's (mqtt.js's own reconnect off, 6 s connect timeout; 1 s x3, "
+              "then up to 30 s, 10 min while another broker works), and a hidden page's closed link tries nothing",
+              ok, [d, opts, tried, hidden])
+
+    for name, fn in [("R2e", case_r2e), ("R2f", case_r2f), ("R2h6", case_r2h6), ("R2d", case_r2d), ("R1", case_r1),
+                     ("H", case_retries)]:
         guarded(name, fn)
 
     # ---- P: the Photographer's recheck 1 ----------------------------------------------------------------------

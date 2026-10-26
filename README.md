@@ -20,6 +20,11 @@ kept on the glasses (per pairing) and drawn at once on the next launch, marked w
 The phone's state on `bkr/<topic>/s` fills in the levels until the phone answers; a broker's stored copy (MQTT
 retained) is shown with its time and never replaces what the phone said on this visit.
 
+All three brokers are opened together, and the page schedules each one's retries itself, as Tidal Glass build 17 does
+(mqtt.js's own reconnect is off; connect timeout 6 s): 1 s for the first three tries, then doubling to 30 s while
+nothing is connected, and up to 10 minutes for a broker that keeps failing while another carries the link. The link
+closes 400 ms after the page is hidden, and closing it clears every pending retry, so nothing is tried while hidden.
+
 ## How the numbers are worked out
 
 - **Tick to tick.** Levels move in whole percents, so a rate is measured from one change of the level to another,
@@ -38,21 +43,35 @@ retained) is shown with its time and never replaces what the phone said on this 
 - **When to charge** is said as clock times, from the current stretch off the charger (it starts after the last
   reading that was charging, unknown or disconnected, or where the readings break: a jump, a rise, or 6 hours with no
   reading), and the line says which pace it uses:
-  - 3 or more changes of the level in the last 30 minutes: the pace now, "At this pace: 20% around 9:30 PM · empty
-    around 11:30 PM" (the empty time only when it needs no day name, so the line stays on one line);
-  - fewer (a slow drain, such as off the face): the pace over the whole stretch, with 3 changes at least, "At the pace
-    since unplugging: 20% around 5:30 AM", or "since 6:45 PM" when the stretch did not start at the charger (the
-    phone lost the glasses, or saw a jump);
-  - until then, today's rate for what is going on now, "20% around 9:30 PM if Tidal Glass stays open".
+  - "At this pace: 20% around 9:30 PM · empty around 11:30 PM" counts only the changes of the level since the
+    situation last changed (worn or not, the glasses app in use, Follow my voice, Tidal playing) that are also in the
+    last 30 minutes, 3 at least, so it never blends two situations. The empty time is shown only when it needs no day
+    name, so the line stays on one line;
+  - fewer: today's rate for what is going on now, when today's list has a row for it, "20% around 9:30 PM if Tidal
+    Glass stays open";
+  - else the pace over the whole stretch, with 3 changes at least, "At the pace since unplugging: 20% around 5:30 AM",
+    or "since 6:45 PM" when the stretch did not start at the charger (the phone lost the glasses, or saw a jump). This
+    line can span a change of situation, and its label says what it measures.
 
-  Times are rounded to 5 minutes within the hour, 15 within 3 hours, 30 beyond. While charging: "Full around …" from
-  this charge's own readings, or nothing.
+  The phone's word on worn, the app in use and Follow my voice counts too: when it differs from the last reading, the
+  situation changed after it. Tidal playing is taken from the readings only, because the phone's live state blinks off
+  between songs, so after music starts the line can keep the earlier pace until the next answer (the page asks every
+  5 minutes). Times are rounded to 5 minutes within the hour, 15 within 3 hours, 30 beyond. While charging: "Full
+  around …" from this charge's own readings, or nothing.
 - **The chart** breaks where the readings stop being continuous (a jump of more than 2 points, or over 30 minutes of
   unknown or disconnected readings). The phone writes a line only on a change, so a long quiet stretch stays joined.
 
 Not counted, because the phone cannot see them: Meta's own apps, the display's brightness, the radios, Quran Glass
 outside Follow my voice, and Bakar Studio or Bakar Home being open (they talk to the PC, not the phone). One dim line
 under the list names Meta's apps, brightness and Quran Glass outside Follow my voice.
+
+## Adding it to the glasses
+
+Battery is added to the glasses from the Tidal Glass phone app, with the pairing in its address. The installed phone
+build (2026-10-25 18:59) adds it through an "Add Battery to your glasses" notification that the coordinator sends; the
+next build also has a "Put Battery on my glasses" button. The unlinked screen says only what is true on both: "It is
+added from the Tidal Glass app on your phone, which links it." After the next phone install, the button's name can go
+back into that hint, with check D11 changed to match.
 
 ## Privacy
 
@@ -67,5 +86,8 @@ stays in this app's own storage there.
 `python webapp/tests/battery_test.py [base_url] [shots_dir]` (set `BATTERY_TEST_VERBOSE=1` to print what each check
 saw). The test fakes the brokers and the glasses' own battery, blocks service workers (a controlled page would load the
 real MQTT library), and plays the phone, so no message leaves the PC. It includes the Director's harness cases
-(B01-B05, T1-T3), which fail on 78e18cc, and the first rechecks' cases (Director N11, N11r, N13; Photographer A-C),
-which fail on bccfc7c. Captures are drawn with greyscale text (`--disable-lcd-text`), as on the glasses.
+(B01-B05, T1-T3), which fail on 78e18cc, the first rechecks' cases (Director N11, N11r, N13; Photographer A-C), which
+fail on bccfc7c, and the Director's second recheck (R2d, R2e, R2f, R2h6 and R1 for "At this pace", H for the
+retries), which fail on 3b127b9. With that recheck, D2 and the first since-reconnect check changed on purpose (no "At
+this pace" just after a change; today's rate before the pace since unplugging), and so did D11 with the unlinked
+hint; each check says why. Captures are drawn with greyscale text (`--disable-lcd-text`), as on the glasses.
