@@ -289,9 +289,9 @@ with sync_playwright() as p:
     browser = p.chromium.launch(channel="chrome", args=["--enable-spatial-navigation", "--disable-lcd-text"])
     errors = []
 
-    def new_context():
+    def new_context(user_agent="Mozilla/5.0 (Linux; Android 14; Greatwhite) AppleWebKit/537.36 Chrome/151.0 Mobile Safari/537.36"):
         ctx = browser.new_context(viewport={"width": 600, "height": 600}, service_workers="block", locale="en-US",
-                                  timezone_id="America/Toronto")
+                                  timezone_id="America/Toronto", user_agent=user_agent)
         ctx.add_init_script(FAKE_BATTERY)
         ctx.add_init_script(EFF)
         ctx.route("**/vendor/mqtt.min.js", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE_MQTT))
@@ -340,13 +340,15 @@ with sync_playwright() as p:
     hint = pg.evaluate("document.querySelector('#unpaired .hint').textContent")
     hint_lines = pg.evaluate("""() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('#unpaired .hint'));
         return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size; }""")
-    # Changed on purpose again (coordinator, 2026-10-26): the phone build installed 2026-10-26 00:04 has the "Put Battery
-    # on my glasses" button (MainActivity.kt), so the hint names it, as the README said it could after that install.
-    # The example wording "On your phone, open the Tidal Glass app and tap ..." takes two lines at 17 px, so it is
-    # shortened to stay on one line (the Photographer's recheck 1 note on the split hint).
-    check("D11 the unlinked screen's hint names the phone app's button, on one line",
-          hint == "On your phone, tap “Put Battery on my glasses” in Tidal Glass." and hint_lines == 1,
+    check("1a unpaired display explains the Android-only band history without asking to reinstall",
+          hint == "Band level and history need Tidal Glass on Android." and hint_lines == 1,
           [hint, hint_lines])
+    pg.evaluate("window.__setBattery(0.64, false)")
+    check("1b an unpaired display reports its own reading without a broker", pg.locator("#localLevel").inner_text() == "Glasses 64%")
+    phone = page_at(f"{BASE}index.html?test=1", ctx=new_context("Mozilla/5.0 (iPhone; CPU iPhone OS 27_2 like Mac OS X)"))
+    phone.evaluate("window.__setBattery(0.92, true)")
+    check("1c the phone battery is never shown as the glasses level", phone.locator("#localLevel").inner_text() == "Glasses level unavailable.")
+    close(phone)
     shot(pg, "1-unpaired")
     close(pg)
 
@@ -380,7 +382,7 @@ with sync_playwright() as p:
     # without "(glasses mic on)": the phone listens through its own microphone when it cannot reach the glasses'.
     ok4 = (v["glasses"] == f"{last['g']}%" and v["band"] == f"{last['b']}%" and "around" in v["left"]
            and v["rows"] and v["rows"][0].startswith("Follow my voice |") and len(g_pts) > 50 and len(b_pts) > 50
-           and v["state"].startswith("From your phone") and max(y for _, y in g_pts) < 90)
+           and v["state"].startswith("From Android") and max(y for _, y in g_pts) < 90)
     check("4 the answer draws both levels, the time left, how fast they drain (highest first) and both lines, never a 0% that was only unknown", ok4, json.dumps(v)[:500])
 
     # 5. low and charging
@@ -405,7 +407,7 @@ with sync_playwright() as p:
     # (Photographer recheck 1, C): an old level dims its parts, not its box, so its age note can stay bright; the check
     # reads how strongly each number is drawn.
     check("6 no answer for 12 s: the phone is not answering, in the warning look, and the last word dims",
-          warn[0].startswith("Your phone is not answering") and warn[1] and warn[2][0] and warn[2][1] < 1 and warn[2][2] < 1, warn)
+          warn[0].startswith("Android is not answering") and warn[1] and warn[2][0] and warn[2][1] < 1 and warn[2][2] < 1, warn)
 
     # 7. span
     pg.evaluate("asked = 0; window.__clients.forEach((c) => { c.sent.length = 0; })")
@@ -523,7 +525,7 @@ with sync_playwright() as p:
         pg.evaluate("asked = Date.now() - 13000; render()")
         v = view(pg)
         when = pg.evaluate("(at) => new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })", at)
-        ok = (v["state"].startswith("Your phone is not answering") and f"levels from {when}" in v["state"]
+        ok = (v["state"].startswith("Android is not answering") and f"levels from {when}" in v["state"]
               and v["glasses"] == "64%" and "old" in v["glassesCls"].split() and v["band"] == "71%" and "old" in v["bandCls"].split()
               and v["rows"] == ["Waiting for your phone's readings"] and v["left"] == "")
         check("B05 a 3-hour-old copy of the levels says when it is from, dims, and the list waits for the phone", ok, v)
@@ -601,7 +603,7 @@ with sync_playwright() as p:
         pg = page_at(URL, connect=False)
         pg.wait_for_timeout(500)
         v = view(pg)
-        ok = v["state"].startswith("Connecting to your phone") and v["rows"] == [] and v["bandNote"] == "" and v["left"] == ""
+        ok = v["state"].startswith("Connecting to Android") and v["rows"] == [] and v["bandNote"] == "" and v["left"] == ""
         check("D7 no link: the list stays empty and no note gives another reason; the top line says it", ok, v)
         close(pg)
 
@@ -724,7 +726,7 @@ with sync_playwright() as p:
         pg.wait_for_timeout(300)
         v = view(pg)
         when = answered.split(" · ")[-1]
-        ok = (v["state"] == f"Connecting to your phone… · levels from {when}" and v["glasses"] == f"{s.now()['g']}%"
+        ok = (v["state"] == f"Connecting to Android… · levels from {when}" and v["glasses"] == f"{s.now()['g']}%"
               and "old" in v["glassesCls"].split() and v["band"] == f"{s.now()['b']}%" and len(v["rows"]) >= 5
               and len(path_pts(v["gPath"])) > 20)
         check("D6 the last answer, kept on the glasses, is drawn at once while the link connects, marked with its time", ok, v)
@@ -733,7 +735,7 @@ with sync_playwright() as p:
         pg.wait_for_timeout(200)
         v = view(pg)
         ok = (v["glasses"] == "34%" and "old" not in v["glassesCls"].split() and "old" in v["bandCls"].split()
-              and v["state"] == f"Connecting to your phone… · band from {when}")
+              and v["state"] == f"Connecting to Android… · band from {when}")
         check("D6 the glasses' own battery reading comes first and stays bright; the phone's band level says its time", ok, v)
         shot(pg, "6-no-link-saved")
         pg.evaluate("__setBattery(0.34, true)")
@@ -862,7 +864,7 @@ with sync_playwright() as p:
         sw = fetch("sw.js")
         # Match the current shell version so the glasses drop the previous Battery copy.
         ok = ("and how fast they drain" in html and "When acting for the wearer" not in html
-              and "and how fast they drain" in manifest["description"] and "const CACHE = 'battery-glass-v5';" in sw)
+              and "and how fast they drain" in manifest["description"] and "const CACHE = 'battery-glass-v6';" in sw)
         check("D5 the page and launcher descriptions say \"how fast they drain\"; no instruction in the description; cache v5", ok)
 
     for name, fn in [("D7 no link", case_no_link), ("D7 not enough", case_not_enough), ("D normal day", case_normal_day),
@@ -1371,7 +1373,7 @@ with sync_playwright() as p:
         close(pg)
         check("C a copy 50 minutes old gives no time line (it would be worked out from a level that old), and the top "
               "line dates it (3af1600: a time for tonight from the old level)",
-              v["left"] == "" and v["state"] == f"Connecting to your phone… · levels from {when}", [v["left"], v["state"]])
+              v["left"] == "" and v["state"] == f"Connecting to Android… · levels from {when}", [v["left"], v["state"]])
 
     def case_c_young():
         # C: a copy 20 minutes old is worked out from its own time: had the use gone on, the times are those.

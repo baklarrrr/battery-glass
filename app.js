@@ -317,7 +317,8 @@ function loadSaved() {
 // (as in Quran Glass; a truly full battery on its charger looks the same, and the phone's report then fills in).
 
 function watchOwnBattery() {
-  if (!navigator.getBattery) return;
+  // An ordinary phone or laptop tab reports its host battery, not the glasses.
+  if (!/\bGreatwhite\b/i.test(navigator.userAgent) || !navigator.getBattery) return;
   navigator.getBattery().then((b) => {
     const read = () => {
       const unknown = b.level === 1 && b.charging && b.chargingTime === 0 && b.dischargingTime === Infinity;
@@ -781,7 +782,11 @@ function render() {
   const paired = !!key;
   setHidden($('unpaired'), paired);
   setHidden($('main'), !paired);
-  if (!paired) return;
+  if (!paired) {
+    const text = own ? `Glasses ${own.level}%${own.charging ? ' · charging' : ''}` : 'Glasses level unavailable.';
+    setText($('localLevel'), text);
+    return;
+  }
   renderTop();
   const sig = `${version}|${span}|${linkUp()}|${!!asked}|${notAnswering()}`;
   if (sig === drawn) return;
@@ -792,9 +797,9 @@ function render() {
 // The top line: where the numbers come from, and when the phone's levels are from when they are not news.
 function renderTop() {
   const waiting = notAnswering();
-  let text = !linkUp() ? (everLinked ? 'Reconnecting…' : 'Connecting to your phone…')
-    : waiting ? 'Your phone is not answering'
-    : answeredAt ? `From your phone · ${when(answeredAt)}` : 'Asking your phone…';
+  let text = !linkUp() ? (everLinked ? 'Reconnecting…' : 'Connecting to Android…')
+    : waiting ? 'Android is not answering'
+    : answeredAt ? `From Android · ${when(answeredAt)}` : 'Asking Android…';
   if (phone && phoneStale()) {
     const g = !own && phone.g >= 0;
     const b = phone.b >= 0;
@@ -1024,10 +1029,8 @@ async function main() {
   $('span').addEventListener('click', () => { span = span === 'day' ? 'week' : 'day'; version++; render(); if (key) ask(); });
   window.addEventListener('online', () => { if (document.visibilityState === 'visible') { closeLink(); openLink(); ask(); } });
   if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) { /* optional */ } }
-  if (key) {
-    loadSaved();
-    watchOwnBattery();
-  }
+  if (key) loadSaved();
+  watchOwnBattery();
   render();
   if (key) {
     $('span').focus();
