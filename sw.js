@@ -4,7 +4,7 @@
 // Network first, so an update shows up on the very next launch; the copy is only the fallback.
 // Only this site's own files are handled; the phone link (MQTT over WebSocket) and artwork always go
 // to the network.
-const CACHE = 'battery-glass-v4';
+const CACHE = 'battery-glass-v5';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'vendor/mqtt.min.js', 'icon.svg', 'icon-mono.svg'];
 
 // The copy is filled straight from the server too, never from the browser's own cache.
@@ -17,7 +17,10 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      // Every app on this origin shares Cache Storage. Remove only this app’s old shells.
+      .then((keys) => Promise.all(keys
+        .filter((key) => /^battery-glass-v\d+$/.test(key) && key !== CACHE)
+        .map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
