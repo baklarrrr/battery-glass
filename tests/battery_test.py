@@ -878,9 +878,12 @@ with sync_playwright() as p:
         manifest = json.loads(fetch(".well-known/meta-wearables-manifest.json"))
         sw = fetch("sw.js")
         # Match the current shell version so the glasses drop the previous Battery copy.
-        ok = ("and how fast they drain" in html and "When acting for the wearer" not in html
-              and "and how fast they drain" in manifest["description"] and "const CACHE = 'battery-glass-v7';" in sw)
-        check("D5 the page and launcher descriptions say \"how fast they drain\"; no instruction in the description; cache v7", ok)
+        web_manifest = json.loads(fetch("manifest.webmanifest"))
+        description = "Check the battery level and charging status of your glasses."
+        ok = (description in html and manifest["name"] == web_manifest["name"] == "Battery"
+              and manifest["description"] == web_manifest["description"] == description
+              and "const CACHE = 'battery-glass-v8';" in sw)
+        check("D5 web and launcher metadata match the default glasses battery function", ok)
 
     for name, fn in [("D7 no link", case_no_link), ("D7 not enough", case_not_enough), ("D normal day", case_normal_day),
                      ("D6 saved and own", case_saved_and_own), ("D10 charging", case_charging), ("D2 low", case_low),
