@@ -90,21 +90,11 @@ function toB64url(bytes) {
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-// On the glasses every installed app keeps its own storage, so the phone adds this one with the pairing in its
-// address (#t=…&k=…, never sent to a server); a copy is kept for launches without it.
-function readPairing() {
-  const p = new URLSearchParams(location.hash.slice(1));
-  let t = p.get('t');
-  let k = p.get('k');
-  try {
-    if (t && k) localStorage.setItem('bg.pair', JSON.stringify({ t, k }));
-    else {
-      const saved = JSON.parse(localStorage.getItem('bg.pair') || 'null');
-      if (saved) ({ t, k } = saved);
-    }
-  } catch (e) { /* storage may be off; the address still works */ }
-  return t && k ? { t, k } : null;
+// Only a link explicitly issued for an Android companion may request its history.
+function androidBridge() {
+  return new URLSearchParams(location.hash.slice(1)).get('androidBridge') || '';
 }
+const visitBridge = androidBridge();
 
 async function seal(obj) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -153,7 +143,7 @@ function scheduleRetry(client) {
 // Connect timeout 6 s (was 8 s), as Tidal Glass: the slowest successful connect the glasses reported was 4.1 s, and
 // every try that hangs costs the whole timeout before the next one.
 function openLink() {
-  if (links.length || typeof mqtt === 'undefined') return;
+  if (!key || androidBridge() !== visitBridge || links.length || typeof mqtt === 'undefined') return;
   downAt = Date.now();
   const id = toB64url(crypto.getRandomValues(new Uint8Array(6))).replace(/[-_]/g, 'x');
   for (const { url, ...extra } of BROKERS) {
@@ -197,6 +187,7 @@ function closeLink() {
 let requestBody = '';
 
 async function ask() {
+  if (!key || androidBridge() !== visitBridge) return;
   const ts = Date.now();
   const from = ts - WINDOWS[span];
   const newest = history.length ? history[history.length - 1].at : 0;
@@ -213,7 +204,7 @@ async function ask() {
 }
 
 function publishRequest(client) {
-  if (requestBody) client.publish(`bkr/${topic}/c`, requestBody, { qos: 1 });
+  if (requestBody && androidBridge() === visitBridge && links.includes(client)) client.publish(`bkr/${topic}/c`, requestBody, { qos: 1 });
 }
 
 async function handle(text, retained = false) {
@@ -1017,17 +1008,22 @@ function checkCalm() {
 }
 
 async function main() {
-  const pair = readPairing();
-  if (pair) {
-    topic = pair.t;
-    try { key = await crypto.subtle.importKey('raw', fromB64url(pair.k), 'AES-GCM', false, ['encrypt', 'decrypt']); } catch (e) { key = null; }
+  window.addEventListener('hashchange', () => {
+    if (androidBridge() === visitBridge) return;
+    closeLink();
+    location.reload();
+  });
+  const [t, k, extra] = visitBridge.split('~');
+  if (t && k && extra === undefined) {
+    topic = t;
+    try { key = await crypto.subtle.importKey('raw', fromB64url(k), 'AES-GCM', false, ['encrypt', 'decrypt']); } catch (e) { key = null; }
   }
   document.addEventListener('keydown', wakeUp, true);
   document.addEventListener('pointerdown', wakeUp, true);
   document.addEventListener('click', wakeUp, true);
   document.addEventListener('visibilitychange', onVisibility);
   $('span').addEventListener('click', () => { span = span === 'day' ? 'week' : 'day'; version++; render(); if (key) ask(); });
-  window.addEventListener('online', () => { if (document.visibilityState === 'visible') { closeLink(); openLink(); ask(); } });
+  window.addEventListener('online', () => { if (key && document.visibilityState === 'visible') { closeLink(); startVisit(); } });
   if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) { /* optional */ } }
   if (key) loadSaved();
   watchOwnBattery();

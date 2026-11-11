@@ -41,7 +41,6 @@ main { block-size: 100%; }
 h1 { margin: 0; font-size: 34px; font-weight: 600; }
 h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); letter-spacing: 0.02em; }
 .say { margin: 0; font-size: 22px; }
-.hint { margin: 0; font-size: 17px; color: var(--dim); line-height: 1.35; }
 
 /* ---- top line ------------------------------------------------------------------------------------ */
 .topline { display: flex; align-items: center; min-block-size: 22px; font-size: 15px; color: var(--dim); }

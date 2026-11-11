@@ -47,7 +47,7 @@ from playwright.sync_api import sync_playwright
 KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:47641/").rstrip("/") + "/"
 SHOTS = Path(sys.argv[2]) if len(sys.argv) > 2 else None
-URL = f"{BASE}index.html?test=1#t=bgtest&k={KEY}"
+URL = f"{BASE}index.html?test=1#androidBridge=bgtest~{KEY}"
 MIN = 60_000
 HOUR = 60 * MIN
 AMBER = "rgb(255, 176, 138)"
@@ -301,7 +301,7 @@ with sync_playwright() as p:
         pg = (ctx or new_context()).new_page()
         pg.on("pageerror", lambda e: errors.append(str(e)))
         pg.goto(url)
-        if "#t=" in url:
+        if "#androidBridge=" in url:
             pg.wait_for_function("window.__clients && window.__clients.length === 3")
             if connect:
                 pg.evaluate("window.__clients.forEach((c) => c.fire('connect'))")
@@ -335,16 +335,31 @@ with sync_playwright() as p:
     # ---- 1. Unpaired --------------------------------------------------------------------------------------
     pg = page_at(f"{BASE}index.html?test=1")
     pg.wait_for_timeout(400)
-    check("1 without a pairing the page says how it gets linked",
+    check("1 the default launch shows the local battery screen",
           pg.evaluate("!document.getElementById('unpaired').hidden && document.getElementById('main').hidden"))
-    hint = pg.evaluate("document.querySelector('#unpaired .hint').textContent")
-    hint_lines = pg.evaluate("""() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('#unpaired .hint'));
-        return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size; }""")
-    check("1a unpaired display explains the Android-only band history without asking to reinstall",
-          hint == "Band level and history need Tidal Glass on Android." and hint_lines == 1,
-          [hint, hint_lines])
+    check("1a default display shows the glasses reading without an Android setup hint",
+          "Android" not in pg.locator("body").inner_text())
     pg.evaluate("window.__setBattery(0.64, false)")
     check("1b an unpaired display reports its own reading without a broker", pg.locator("#localLevel").inner_text() == "Glasses 64%")
+    pg.evaluate("(key) => localStorage.setItem('bg.pair', JSON.stringify({t:'old-phone',k:key}))", KEY)
+    pg.goto(f"{BASE}index.html#t=old-phone&k={KEY}")
+    pg.evaluate("""() => {
+        window.__setBattery(0.64, false);
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('online'));
+    }""")
+    check("1d old install and saved phone stay local on reconnect and resume",
+          pg.evaluate("window.__clients.length === 0 && !key && !asked")
+          and pg.locator("#localLevel").inner_text() == "Glasses 64%")
+    pg.goto(URL)
+    pg.wait_for_function("window.__clients.length === 3")
+    pg.goto(f"{BASE}index.html#t=old-phone&k={KEY}")
+    pg.wait_for_function("window.__clients.length === 0 && !key")
+    pg.go_back()
+    pg.wait_for_function("window.__clients.length === 3")
+    pg.go_forward()
+    pg.wait_for_function("window.__clients.length === 0 && !key")
+    pg.evaluate("window.__setBattery(0.64, false)")
     phone = page_at(f"{BASE}index.html?test=1", ctx=new_context("Mozilla/5.0 (iPhone; CPU iPhone OS 27_2 like Mac OS X)"))
     phone.evaluate("window.__setBattery(0.92, true)")
     check("1c the phone battery is never shown as the glasses level", phone.locator("#localLevel").inner_text() == "Glasses level unavailable.")
@@ -864,8 +879,8 @@ with sync_playwright() as p:
         sw = fetch("sw.js")
         # Match the current shell version so the glasses drop the previous Battery copy.
         ok = ("and how fast they drain" in html and "When acting for the wearer" not in html
-              and "and how fast they drain" in manifest["description"] and "const CACHE = 'battery-glass-v6';" in sw)
-        check("D5 the page and launcher descriptions say \"how fast they drain\"; no instruction in the description; cache v5", ok)
+              and "and how fast they drain" in manifest["description"] and "const CACHE = 'battery-glass-v7';" in sw)
+        check("D5 the page and launcher descriptions say \"how fast they drain\"; no instruction in the description; cache v7", ok)
 
     for name, fn in [("D7 no link", case_no_link), ("D7 not enough", case_not_enough), ("D normal day", case_normal_day),
                      ("D6 saved and own", case_saved_and_own), ("D10 charging", case_charging), ("D2 low", case_low),

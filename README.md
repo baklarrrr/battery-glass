@@ -99,7 +99,7 @@ under the list names Meta's apps, brightness and Quran Glass outside Follow my v
 
 ## Adding it to the glasses
 
-Battery is added to the glasses from the Tidal Glass phone app, with the pairing in its address. On Meta Ray-Ban Display, a meaningful local battery reading now appears even without the
+The standard Battery launch reads the glasses locally. To request Android history an Android companion must supply an explicit `#androidBridge=topic~key` fragment. Legacy addresses and saved pairings stay local-only. On Meta Ray-Ban Display, a meaningful local battery reading now appears even without the
 Android companion. The verified Display browser identifies itself as Greatwhite. A normal iPhone
 or laptop browser never reports its own charge as the glasses' level. The Android link supplies
 band readings and history. With no usable sample the page says the glasses level is unavailable.
