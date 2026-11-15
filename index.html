@@ -91,8 +91,19 @@
       </footer>
     </section>
   </main>
+  <script>
+    // If the app's code never arrives or never starts, say so instead of leaving the screen black.
+    function batteryFailed() {
+      if (window.batteryStarted) return;
+      document.getElementById('main').hidden = true;
+      document.getElementById('unpaired').hidden = false;
+      document.getElementById('localLevel').textContent = 'Battery could not start.';
+      document.getElementById('localWhy').textContent = 'Check the connection, then close Battery and open it again.';
+    }
+    setTimeout(batteryFailed, 10000);
+  </script>
   <script src="vendor/mqtt.min.js"></script>
   <script src="battery-log.js" data-app="Battery"></script>
-  <script src="app.js"></script>
+  <script src="app.js" onerror="batteryFailed()"></script>
 </body>
 </html>

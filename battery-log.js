@@ -3,32 +3,39 @@
 //   <script src="/battery-glass/battery-log.js" data-app="Tidal Glass"></script>
 // No dependencies, no network. Readings stay in this browser's storage: [time, level 0-100, charging 0/1, app].
 // (A fifth item, 1, marks a reading that only says the level before it still held.)
-// Kept 7 days, 2000 readings at most. A reading is taken on opening, on a change of level or charging, when the
-// page is shown or hidden, and every 4 minutes while it is on screen. Nothing here ever throws.
+// Kept 7 days, 2000 at most. Taken on opening, on a change of level or charging, when the page is shown or hidden,
+// and every 4 minutes on screen. Nothing here ever throws. A store that cannot be read (not JSON, not a list, a broken
+// row) heals on the next reading; with storage off or full this visit's are kept in memory (window.bakarBatteryLog).
 (function () {
   'use strict';
   var KEY = 'bakar.battery.log'; // one store for every app on this origin
-  var KEEP = 7 * 24 * 3600000;
-  var MAX = 2000;
+  var KEEP = 7 * 24 * 3600000, MAX = 2000, EVERY = 4 * 60000;
   var HELD = 15 * 60000; // readings further apart than this are a gap: nobody was reading
-  var EVERY = 4 * 60000;
   var me = document.currentScript;
   var app = String((me && me.getAttribute('data-app')) || document.title || 'App').slice(0, 24);
-
+  var mem = null; // this visit's readings, while storage cannot keep them
+  function kept(now) {
+    var log = null; // off or unreadable: started again
+    try { log = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { log = null; }
+    var ok = function (r) { return Array.isArray(r) && typeof r[0] === 'number' && r[0] > now - KEEP && r[0] <= now && typeof r[1] === 'number' && r[1] >= 0 && r[1] <= 100; };
+    log = (Array.isArray(log) ? log : []).filter(ok);
+    return mem && mem.length && (!log.length || mem[mem.length - 1][0] >= log[log.length - 1][0]) ? mem.filter(ok) : log;
+  }
   function add(level, charging) {
     try {
       var now = Date.now();
-      var log = JSON.parse(localStorage.getItem(KEY) || '[]');
-      log = (Array.isArray(log) ? log : []).filter(function (r) { return Array.isArray(r) && r[0] > now - KEEP && r[0] <= now; });
+      var log = kept(now);
       var a = log[log.length - 1];
       var held = a && a[1] === level && a[2] === charging && a[3] === app && now - a[0] <= HELD;
       if (held && now - a[0] < 1000) return; // the same reading twice at once
       // While nothing changes, two readings say "held from, until": the second (marked 1) only moves forward in time.
       if (held && a[4]) a[0] = now;
       else log.push(held ? [now, level, charging, app, 1] : [now, level, charging, app]);
-      localStorage.setItem(KEY, JSON.stringify(log.slice(-MAX)));
+      window.bakarBatteryLog = log = log.slice(-MAX);
+      try { localStorage.setItem(KEY, JSON.stringify(log)); mem = null; } catch (e) { mem = log; // off or full: kept for
+        try { localStorage.setItem(KEY, JSON.stringify(log.slice(-MAX / 4))); } catch (e2) { /* this visit */ } }
       window.dispatchEvent(new Event('batterylog'));
-    } catch (e) { /* storage full, off or unreadable: this reading is not kept */ }
+    } catch (e) { /* this reading is not kept */ }
   }
 
   try {

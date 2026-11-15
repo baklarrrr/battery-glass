@@ -1983,8 +1983,129 @@ with sync_playwright() as p:
         check("Q7 beside the level: Full at 100%, Low and Very low with what to do, an old reading with its time and never "
               "as charging now; where no time can be worked out the line says why, with no number", bool(ok), [full, low, very, past, was])
 
+    # Readings five minutes apart without waiting: the page's clock is moved on before each.
+    READ = """(levels) => { const real = Date.now; levels.forEach((l, i) => { Date.now = () => real() + i * 5 * 60000; window.__setBattery(l, false); }); }"""
+
+    def case_q_heals():
+        # A store that is not JSON, not a list, or holds broken rows: the next reading starts it again clean, keeping
+        # the rows that are readings. Before, a store that could not be parsed stayed broken for good.
+        out = []
+        for raw in ['{"not":"a list', '{"a":1}', 'null', '"text"',
+                    json.dumps([None, 5, "x", [1, 2], ["a", "b", 0, 0], {"at": 3}, [9e99, 50, 0, "Battery"], [0, 500, 0, "B"], ["1", "50", 0, "B"]])]:
+            pg = page_at(LOCAL)
+            pg.evaluate("(r) => localStorage.setItem('bakar.battery.log', r)", raw)
+            pg.reload()
+            pg.evaluate(READ, [0.64, 0.63, 0.62])
+            pg.wait_for_timeout(200)
+            # The line: the three readings and the level carried to now.
+            out.append([pg.evaluate(f"{LOG}.map((r) => r[1])"), view(pg)["glasses"], len(path_pts(view(pg)["gPath"]))])
+            close(pg)
+        # Good rows among broken ones are kept.
+        pg = page_at(LOCAL)
+        pg.evaluate("""() => { const now = Date.now(); localStorage.setItem('bakar.battery.log', JSON.stringify([null, [now - 600000, 70, 0, 'Battery'],
+            'x', [now - 300000, 69, 0, 'Battery'], [now + 9e6, 10, 0, 'Battery'], [now - 200000, 'full', 0, 'Battery']])); }""")
+        pg.reload()
+        pg.evaluate("window.__setBattery(0.68, false)")
+        pg.wait_for_timeout(200)
+        mixed = pg.evaluate(f"{LOG}.map((r) => r[1])")
+        close(pg)
+        check("Q8 a kept store that is corrupt heals itself on the next reading: not JSON, not a list, or broken rows; "
+              "real readings among them are kept", all(o == [[64, 63, 62], "62%", 4] for o in out) and mixed == [70, 69, 68], [out, mixed])
+
+    def case_q_storage():
+        # Storage that throws on every call: the readings of this visit are still drawn, from memory.
+        ctx = new_context()
+        ctx.add_init_script("Storage.prototype.setItem = () => { throw new Error('full'); }; Storage.prototype.getItem = () => { throw new Error('off'); };")
+        before = len(errors)
+        pg = page_at(LOCAL, ctx=ctx)
+        pg.evaluate(READ, [0.64, 0.63, 0.62, 0.61])
+        pg.wait_for_timeout(200)
+        off = [view(pg)["glasses"], len(path_pts(view(pg)["gPath"])), pg.evaluate(STATS)["Used"]]
+        close(pg)
+        # Storage that is full (reads work, writes throw): new readings still count, on top of what was kept.
+        pg = local_page([[30 - i * 5, 70 - i, 0, "Battery"] for i in range(6)])
+        pg.evaluate("() => { Storage.prototype.setItem = () => { throw new DOMException('full', 'QuotaExceededError'); }; }")
+        pg.evaluate(READ, [0.64, 0.63, 0.62, 0.61])
+        pg.wait_for_timeout(200)
+        full = [view(pg)["glasses"], len(path_pts(view(pg)["gPath"])), pg.evaluate(STATS)["Low"][:3]]
+        close(pg)
+        check("Q9 storage that is off or full loses nothing on screen: this visit's readings are kept in memory and drawn, "
+              "and nothing throws", off == ["61%", 5, "at least 3%"] and full[0] == "61%" and full[1] >= 10 and full[2] == "61%"
+              and len(errors) == before, [off, full, errors[before:]])
+
+    def case_q_no_level():
+        # A battery the browser refuses, or one that gives nonsense: never a blank screen, never a level.
+        out = {}
+        before = len(errors)
+        for name, init, level in [
+                ("throws", "Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { throw new Error('nope'); } });", None),
+                ("not a promise", "Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { return 5; } });", None),
+                ("rejects", "Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { return Promise.reject(new Error('no')); } });", None),
+                ("not a number", None, "NaN"), ("over 100%", None, "1.7"), ("below 0", None, "-0.2"), ("text", None, "'full'")]:
+            ctx = new_context()
+            if init:
+                ctx.add_init_script(init)
+            pg = page_at(LOCAL, ctx=ctx)
+            if level:
+                pg.evaluate(f"window.__setBattery({level}, false)")
+            pg.wait_for_timeout(200)
+            out[name] = pg.evaluate(f"[!document.getElementById('unpaired').hidden, document.getElementById('localLevel').textContent, document.querySelector('#glasses .pct').textContent, {LOG}.length]")
+            close(pg)
+        check("Q10 a battery the browser refuses, or a level that is not a number from 0 to 100%, is never shown or kept "
+              "and never leaves a blank screen", all(v == [True, "Glasses level unavailable.", "—", 0] for v in out.values())
+              and len(errors) == before, [out, errors[before:]])
+
+    def case_q_never_blank():
+        # The app's code never arrives: the page itself says so. Drawing throws: the screen says so with the level, and
+        # the next change draws everything again.
+        ctx = new_context()
+        ctx.route("**/app.js", lambda r: r.abort())
+        pg = ctx.new_page()
+        pg.goto(LOCAL)
+        pg.wait_for_timeout(300)
+        gone = pg.evaluate("[!document.getElementById('unpaired').hidden, document.getElementById('localLevel').textContent, document.getElementById('localWhy').textContent]")
+        close(pg)
+        before = len(errors)
+        pg = local_page(drain(90, 90, 72, 90), level=0.72)
+        pg.evaluate("() => { window.__stats = renderStats; window.renderStats = () => { throw new Error('broken'); }; version++; render(); }")
+        broke = pg.evaluate("[!document.getElementById('unpaired').hidden, document.getElementById('main').hidden, document.getElementById('localLevel').textContent, document.getElementById('localWhy').textContent]")
+        shot(pg, "Q11-could-not-draw")
+        pg.evaluate("() => { window.renderStats = window.__stats; version++; render(); }")
+        back = [pg.evaluate("document.getElementById('unpaired').hidden && !document.getElementById('main').hidden"), view(pg)["glasses"], len(view(pg)["rows"])]
+        close(pg)
+        ok = (gone == [True, "Battery could not start.", "Check the connection, then close Battery and open it again."]
+              and broke == [True, True, "Glasses 72%", "Battery could not draw the rest. Close it and open it again."]
+              and back == [True, "72%", 1] and len(errors) == before)
+        check("Q11 nothing ends in a blank screen: code that never arrives and drawing that throws both say so in plain "
+              "words (with the level when there is one), and the screen comes back by itself", ok, [gone, broke, back, errors[before:]])
+
+    def case_q_offline():
+        # With the service worker (allowed in this one context; with no Android link the page opens no broker), the
+        # app opens with no network at all, from the copy kept on the glasses.
+        ctx = browser.new_context(viewport={"width": 600, "height": 600}, service_workers="allow", locale="en-US", timezone_id="America/Toronto",
+                                  user_agent="Mozilla/5.0 (Linux; Android 14; Greatwhite) AppleWebKit/537.36 Chrome/151.0 Mobile Safari/537.36")
+        ctx.add_init_script(FAKE_BATTERY)
+        ctx.route("**/vendor/mqtt.min.js", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE_MQTT))
+        pg = ctx.new_page()
+        pg.on("pageerror", lambda e: errors.append(str(e)))
+        pg.goto(LOCAL)
+        pg.evaluate("() => navigator.serviceWorker.ready.then(() => new Promise((done) => { const wait = () => (navigator.serviceWorker.controller ? done() : setTimeout(wait, 50)); wait(); }))")
+        pg.evaluate("window.__setBattery(0.64, false)")
+        pg.wait_for_timeout(200)
+        ctx.set_offline(True)
+        pg.reload()
+        pg.evaluate("window.__setBattery(0.63, false)")
+        pg.wait_for_timeout(300)
+        v = view(pg)
+        styled = pg.evaluate("getComputedStyle(document.body).backgroundColor")
+        started = pg.evaluate("window.batteryStarted === true && window.__clients.length === 0")
+        ctx.close()
+        check("Q12 the app opens with no network, from the copy the service worker keeps, and still reads and keeps the level",
+              v["glasses"] == "63%" and v["state"] == "From your glasses" and styled == "rgb(0, 0, 0)" and started, [v, styled, started])
+
     for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest), ("Q4", case_q_chart), ("Q5", case_q_chart_empty),
-                     ("Q6", case_q_first_open), ("Q7", case_q_notes)]:
+                     ("Q6", case_q_first_open), ("Q7", case_q_notes), ("Q8", case_q_heals), ("Q9", case_q_storage), ("Q10", case_q_no_level),
+                     ("Q11", case_q_never_blank), ("Q12", case_q_offline)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)

@@ -323,11 +323,17 @@ function loadLocal() {
   try {
     const kept = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
     if (Array.isArray(kept)) log = kept;
-  } catch (e) { /* storage off or unreadable: no history */ }
+  } catch (e) { /* storage off or unreadable: no history kept (battery-log.js starts the store again) */ }
+  // With storage off or full, battery-log.js holds this visit's readings in memory; they are used when newer.
+  const live = window.bakarBatteryLog;
+  const lastAt = (l) => (l.length && Array.isArray(l[l.length - 1]) ? l[l.length - 1][0] : 0);
+  if (Array.isArray(live) && live.length && !(lastAt(log) > lastAt(live))) log = live;
   const now = Date.now();
   const out = [];
   for (const r of log) {
-    if (!Array.isArray(r) || !(r[0] >= now - WINDOWS.week && r[0] <= now) || !(r[1] >= 0 && r[1] <= 100)) continue;
+    // A row that is not a reading (not a list, no time, no level from 0 to 100, older than a week, in the future) is skipped.
+    if (!Array.isArray(r) || typeof r[0] !== 'number' || typeof r[1] !== 'number') continue;
+    if (!(r[0] >= now - WINDOWS.week && r[0] <= now) || !(r[1] >= 0 && r[1] <= 100)) continue;
     const prev = out[out.length - 1];
     if (prev && r[0] < prev.at) continue;
     if (prev && r[0] - prev.at > WATCH_GAP) out.push({ at: prev.at, g: -1, gc: '', c: false, b: -1 });
@@ -402,10 +408,15 @@ function renderStats() {
 function watchOwnBattery() {
   // An ordinary phone or laptop tab reports its host battery, not the glasses.
   if (!/\bGreatwhite\b/i.test(navigator.userAgent) || !navigator.getBattery) return;
-  navigator.getBattery().then((b) => {
+  let asking = null;
+  try { asking = navigator.getBattery(); } catch (e) { return; } // a browser that refuses: the level is unavailable
+  if (!asking || typeof asking.then !== 'function') return;
+  asking.then((b) => {
     const read = () => {
       const unknown = b.level === 1 && b.charging && b.chargingTime === 0 && b.dischargingTime === Infinity;
-      const next = unknown ? null : { level: Math.round(b.level * 100), charging: !!b.charging };
+      // A level that is not a number from 0 to 1 is no reading: it is never shown.
+      const real = typeof b.level === 'number' && b.level >= 0 && b.level <= 1;
+      const next = unknown || !real ? null : { level: Math.round(b.level * 100), charging: !!b.charging };
       if (JSON.stringify(next) === JSON.stringify(own)) return;
       own = next;
       version++;
@@ -886,7 +897,29 @@ function phoneStale() {
   return !phone || !phone.live || notAnswering() || !linkUp();
 }
 
+// Nothing may end in a blank screen. If drawing ever throws, the screen says so in plain words, with the level when the
+// glasses give one, and the next change tries the whole drawing again.
 function render() {
+  try {
+    draw();
+  } catch (e) {
+    trouble();
+  }
+}
+
+function trouble() {
+  try {
+    drawn = '';
+    listDrawn = '';
+    setHidden($('main'), true);
+    setHidden($('unpaired'), false);
+    setText($('localLevel'), own ? `Glasses ${own.level}%${own.charging ? ', charging' : ''}` : 'Glasses level unavailable.');
+    setText($('localWhy'), 'Battery could not draw the rest. Close it and open it again.');
+    setText($('localNext'), '');
+  } catch (e) { /* the page itself is gone */ }
+}
+
+function draw() {
   // With no Android link the same screen is drawn from the glasses' own readings, once there is a level or a history.
   const shown = !!key || (local && (!!own || history.length > 0));
   setHidden($('unpaired'), shown);
@@ -1265,6 +1298,7 @@ function checkCalm() {
 }
 
 async function main() {
+  window.batteryStarted = true; // index.html says "could not start" when this never runs
   window.addEventListener('hashchange', () => {
     if (androidBridge() === visitBridge) return;
     closeLink();
@@ -1298,4 +1332,4 @@ async function main() {
   }
 }
 
-main();
+main().catch(trouble);
