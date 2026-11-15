@@ -51,14 +51,19 @@
       </div>
 
       <footer class="foot">
-        <svg id="chart" class="chart" viewBox="0 0 540 96" preserveAspectRatio="none" role="img" aria-label="Battery levels over the last 24 hours">
-          <line x1="0" y1="48" x2="540" y2="48" class="mid"/>
-          <line x1="0" y1="95.5" x2="540" y2="95.5" class="axis"/>
-          <path id="lineBand" class="line band" d=""/>
-          <path id="lineGlasses" class="line glasses" d=""/>
-          <path id="dotsBand" class="dots band" d=""/>
-          <path id="dotsGlasses" class="dots glasses" d=""/>
-        </svg>
+        <div class="plot">
+          <svg id="chart" class="chart" viewBox="0 0 540 96" preserveAspectRatio="none" role="img" aria-label="Battery levels over the last 24 hours">
+            <line x1="0" y1="1" x2="540" y2="1" class="own top"/>
+            <line x1="0" y1="76.2" x2="540" y2="76.2" class="own lowline"/>
+            <line x1="0" y1="48" x2="540" y2="48" class="mid"/>
+            <line x1="0" y1="95.5" x2="540" y2="95.5" class="axis"/>
+            <path id="lineBand" class="line band" d=""/>
+            <path id="lineGlasses" class="line glasses" d=""/>
+            <path id="dotsBand" class="dots band" d=""/>
+            <path id="dotsGlasses" class="dots glasses" d=""/>
+          </svg>
+          <div class="yaxis" aria-hidden="true"><span style="inset-block-start:1%">100%</span><span style="inset-block-start:50%">50%</span><span class="lowmark" style="inset-block-start:79.4%">20%</span></div>
+        </div>
         <div class="chartlabels" aria-hidden="true"><span id="since">24 h ago</span><span>now</span></div>
         <div class="footrow">
           <button id="span" type="button">Last 24 hours</button>

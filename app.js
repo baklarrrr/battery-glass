@@ -866,7 +866,8 @@ function renderData() {
   const bandAge = band >= 0 && phone.bt > 0 ? Date.now() - phone.bt : 0;
   const bandOld = band >= 0 && (stale || bandAge > BAND_FRESH);
   level($('band'), band, false, bandOld);
-  setText($('glassesNote'), G.charging ? 'Charging' : '');
+  // The glasses' own readings: beside the number, what the glasses are doing. With an Android link, as before.
+  setText($('glassesNote'), G.charging ? 'Charging' : local && G.value >= 0 ? (G.old ? 'Last reading kept' : 'On battery') : '');
 
   const windowMs = WINDOWS[span];
   const inWindow = history.filter((r) => r.at >= Date.now() - windowMs);

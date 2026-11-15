@@ -67,8 +67,33 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 
 /* No Android link: the band has no level to show, so its number and bar are not drawn; one line says why. */
 #main.local #band .pct, #main.local #band .bar { display: none; }
-#main.local #band .name { color: var(--dim); }
-#main.local #band { align-content: end; }
+
+/* ---- the glasses' own readings (no Android link) -------------------------------------------------------
+   One device to show, so its level leads at full width: the number, what it is doing beside it, the bar under both.
+   The band is one dim line in the top corner. The chart takes whatever height the list leaves, so the screen is
+   never half empty, and carries its own marks: 100%, 50% and the 20% low line. */
+#main.local { position: relative; gap: 12px; }
+#main.local .levels { display: block; }
+#main.local #band { position: absolute; inset-block-start: 24px; inset-inline-end: 30px; display: flex; gap: 5px; align-items: baseline; min-block-size: 22px; }
+#main.local #band .name, #main.local #band .note { font-size: 14px; line-height: 22px; min-block-size: 0; color: var(--dim); white-space: nowrap; }
+#main.local #band .name::after { content: ":"; }
+#main.local .state { max-inline-size: 310px; }
+#main.local #glasses { grid-template-columns: auto 1fr; grid-template-areas: "pct name" "pct note" "bar bar"; column-gap: 16px; row-gap: 0; align-items: center; }
+#main.local #glasses .pct { grid-area: pct; font-size: 64px; }
+#main.local #glasses .name { grid-area: name; align-self: end; font-size: 15px; color: var(--dim); }
+#main.local #glasses .note { grid-area: note; align-self: start; font-size: 19px; line-height: 26px; min-block-size: 26px; color: var(--soft); }
+#main.local #glasses.charging .note { color: var(--accent); }
+#main.local #glasses.low .note { color: var(--low); }
+#main.local #glasses .bar { grid-area: bar; block-size: 8px; border-radius: 4px; margin-block-start: 10px; }
+#main.local .uses { flex: 0 0 auto; }
+#main.local .foot { flex: 1; min-block-size: 0; display: flex; flex-direction: column; gap: 6px; }
+#main.local .plot { flex: 1; min-block-size: 64px; position: relative; margin-inline-start: 40px; }
+#main.local .chart { position: absolute; inset: 0; block-size: 100%; }
+#main.local .chartlabels { margin-inline-start: 40px; margin-block-end: 2px; }
+#main.local .yaxis { display: block; }
+#main.local .chart .own { display: inline; }
+#main.local .chart .mid, #main.local .chart .axis { vector-effect: non-scaling-stroke; }
+#main.local .chart .mid { stroke-dasharray: 2 6; }
 
 .left { margin: 0; font-size: 18px; color: var(--soft); min-block-size: 24px; }
 
@@ -86,6 +111,14 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 
 /* ---- chart and the one control ----------------------------------------------------------------------- */
 .foot { display: grid; gap: 8px; }
+.plot { display: grid; }
+.yaxis, .chart .own { display: none; }
+.yaxis { position: absolute; inset-block: 0; inset-inline-start: -40px; inline-size: 34px; }
+.yaxis span { position: absolute; inset-inline-end: 0; transform: translateY(-50%); font-size: 13px; line-height: 1; color: var(--dim); font-variant-numeric: tabular-nums; }
+.yaxis span:first-child { transform: translateY(-15%); }
+.yaxis .lowmark { color: var(--low); opacity: 0.8; }
+.chart .top { stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 6; vector-effect: non-scaling-stroke; }
+.chart .lowline { stroke: var(--low); stroke-opacity: 0.55; stroke-width: 1; stroke-dasharray: 2 6; vector-effect: non-scaling-stroke; }
 .chart { inline-size: 100%; block-size: 80px; overflow: visible; } /* a dot at 100% is not cut at the top */
 .chart .mid { stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 6; }
 .chart .axis { stroke: var(--hair); stroke-width: 1; }

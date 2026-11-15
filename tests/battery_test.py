@@ -1791,6 +1791,31 @@ with sync_playwright() as p:
                      ("O9", case_o_other_app), ("O10", case_o_android_unchanged)]:
         guarded(name, fn)
 
+    # ---- Q. The rounds of 15 November 2026: the glasses' own screen (no Android link) -----------------------------
+    BOX = "(s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }"
+
+    def case_q_layout():
+        # One device to show: its level leads, the band is one line, and the chart takes the height the list leaves,
+        # with its own marks. The Android screen keeps its two columns and its 80 px chart with no marks.
+        pg = local_page(drain(90, 90, 72, 90), level=0.72)
+        plot, state, band, pct = [pg.evaluate(BOX, s) for s in (".plot", "#stateText", "#band", "#glasses .pct")]
+        marks = pg.evaluate("[...document.querySelectorAll('.yaxis span')].map((e) => e.textContent + ':' + getComputedStyle(e.parentElement).display)")
+        fits = pg.evaluate("document.documentElement.scrollHeight <= 600 && document.getElementById('main').scrollHeight <= 600")
+        close(pg)
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        android = pg.evaluate("[getComputedStyle(document.querySelector('.yaxis')).display, document.getElementById('chart').getBoundingClientRect().height,"
+                              " getComputedStyle(document.querySelector('.chart .own')).display, getComputedStyle(document.querySelector('.levels')).display]")
+        close(pg)
+        ok = (plot[3] - plot[1] >= 120 and state[2] <= band[0] and pct[3] - pct[1] >= 60 and fits
+              and marks == ["100%:block", "50%:block", "20%:block"] and android == ["none", 80, "none", "grid"])
+        check("Q1 the glasses' own screen has no dead middle: the chart fills the height left, marked 100%, 50% and 20%; "
+              "the band's line clears the top line; the Android screen is laid out as before", ok, [plot, state, band, pct, marks, fits, android])
+
+    for name, fn in [("Q1", case_q_layout)]:
+        guarded(name, fn)
+
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)
     check("no page errors", not errors, "; ".join(errors))
     browser.close()
