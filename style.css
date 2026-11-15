@@ -65,6 +65,11 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 /* An old level dims, but not the note saying how old it is ("Read 3 h ago"): that note explains the dim number. */
 .level.old .name, .level.old .pct, .level.old .bar, .level.old .note:not(.age) { opacity: 0.55; }
 
+/* No Android link: the band has no level to show, so its number and bar are not drawn; one line says why. */
+#main.local #band .pct, #main.local #band .bar { display: none; }
+#main.local #band .name { color: var(--dim); }
+#main.local #band { align-content: end; }
+
 .left { margin: 0; font-size: 18px; color: var(--soft); min-block-size: 24px; }
 
 /* ---- how fast they drain ------------------------------------------------------------------------------
