@@ -20,6 +20,8 @@
     <section id="unpaired" class="screen center" hidden>
       <h1>Battery</h1>
       <p id="localLevel" class="say" aria-live="polite">Glasses level unavailable.</p>
+      <p id="localWhy" class="why"></p>
+      <p id="localNext" class="why"></p>
     </section>
 
     <section id="main" class="screen" aria-label="Battery" hidden>
@@ -43,6 +45,16 @@
       </div>
 
       <p id="left" class="left"></p>
+      <p id="leftHint" class="left hint" hidden></p>
+
+      <dl id="stats" class="stats" hidden>
+        <div><dt>Used today</dt><dd id="statUsed"></dd></div>
+        <div><dt>Lowest today</dt><dd id="statLow"></dd></div>
+        <div><dt>On charge today</dt><dd id="statCharge"></dd></div>
+        <div><dt>Last full charge</dt><dd id="statFull"></dd></div>
+        <div><dt>Average this week</dt><dd id="statWeek"></dd></div>
+        <div><dt>Measured today</dt><dd id="statSeen"></dd></div>
+      </dl>
 
       <div class="uses">
         <h2 id="usesHead">How fast they drain</h2>
@@ -51,15 +63,27 @@
       </div>
 
       <footer class="foot">
-        <svg id="chart" class="chart" viewBox="0 0 540 96" preserveAspectRatio="none" role="img" aria-label="Battery levels over the last 24 hours">
-          <line x1="0" y1="48" x2="540" y2="48" class="mid"/>
-          <line x1="0" y1="95.5" x2="540" y2="95.5" class="axis"/>
-          <path id="lineBand" class="line band" d=""/>
-          <path id="lineGlasses" class="line glasses" d=""/>
-          <path id="dotsBand" class="dots band" d=""/>
-          <path id="dotsGlasses" class="dots glasses" d=""/>
-        </svg>
-        <div class="chartlabels" aria-hidden="true"><span id="since">24 h ago</span><span>now</span></div>
+        <div class="plot">
+          <svg id="chart" class="chart" viewBox="0 0 540 96" preserveAspectRatio="none" role="img" aria-label="Battery levels over the last 24 hours">
+            <line x1="0" y1="1" x2="540" y2="1" class="own top"/>
+            <line x1="0" y1="76.2" x2="540" y2="76.2" class="own lowline"/>
+            <line x1="0" y1="48" x2="540" y2="48" class="mid"/>
+            <line x1="0" y1="95.5" x2="540" y2="95.5" class="axis"/>
+            <path id="dayLines" class="own daylines" d=""/>
+            <path id="ticks" class="own ticks" d=""/>
+            <path id="lineUnseen" class="own gapline" d=""/>
+            <path id="lineUnseenUp" class="own gapline up" d=""/>
+            <path id="lineBand" class="line band" d=""/>
+            <path id="lineGlasses" class="line glasses" d=""/>
+            <path id="lineCharge" class="own line charge" d=""/>
+            <path id="dotsBand" class="dots band" d=""/>
+            <path id="dotsGlasses" class="dots glasses" d=""/>
+            <path id="dotNow" class="own dots now" d=""/>
+          </svg>
+          <div class="yaxis" aria-hidden="true"><span style="inset-block-start:1%">100%</span><span style="inset-block-start:50%">50%</span><span class="lowmark" style="inset-block-start:79.4%">20%</span></div>
+          <p id="chartNote" class="chartnote" hidden></p>
+        </div>
+        <div class="chartlabels" aria-hidden="true"><span id="since">24 h ago</span><span id="xTicks" class="xticks"></span><span>now</span></div>
         <div class="footrow">
           <button id="span" type="button">Last 24 hours</button>
           <span class="key"><span id="keyGlasses" class="k"><span class="sw glasses"></span>Glasses</span><span id="keyBand" class="k"><span class="sw band"></span>Band</span></span>
@@ -67,8 +91,19 @@
       </footer>
     </section>
   </main>
+  <script>
+    // If the app's code never arrives or never starts, say so instead of leaving the screen black.
+    function batteryFailed() {
+      if (window.batteryStarted) return;
+      document.getElementById('main').hidden = true;
+      document.getElementById('unpaired').hidden = false;
+      document.getElementById('localLevel').textContent = 'Battery could not start.';
+      document.getElementById('localWhy').textContent = 'Check the connection, then close Battery and open it again.';
+    }
+    setTimeout(batteryFailed, 10000);
+  </script>
   <script src="vendor/mqtt.min.js"></script>
   <script src="battery-log.js" data-app="Battery"></script>
-  <script src="app.js"></script>
+  <script src="app.js" onerror="batteryFailed()"></script>
 </body>
 </html>

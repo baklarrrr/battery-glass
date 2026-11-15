@@ -41,15 +41,50 @@ and the top line says "From your glasses".
   answer is ignored, and only the Display's browser, Greatwhite, is ever logged): on opening, on a change of level or
   charging, when the page is shown or hidden, and every 4 minutes while on screen. Each is `[time, level, charging,
   app]` in `localStorage` under `bakar.battery.log`, kept 7 days, 2000 at most. While nothing changes a second reading
-  only moves forward in time, so a level that holds is two readings. If storage is full or off, nothing is kept and
-  nothing breaks.
+  only moves forward in time, so a level that holds is two readings. If storage is full or off, the readings of the
+  visit are held in memory and nothing breaks.
 - **Readings are taken only while an app that includes the logger is open.** Two readings more than 15 minutes apart
   are a gap: the chart breaks there, and no rate, no quiet time and no time to charge is worked out across it.
 - **The same rules** as below work them out: tick to tick, jumps of more than 2 points skipped, 3 points over 30
-  minutes for a row, never 0, "Not enough readings yet" until a number can stand. The situation is the app that took
-  the reading ("Battery open"); worn or not, Follow my voice and Tidal playing are not known without the phone. A time
-  to charge needs a reading from the last 15 minutes.
-- **The band** has no level without the phone: its place says "See it in the Meta AI app" and no bar is drawn.
+  minutes for a row, never 0, "Shows after about 30 minutes with one app open" until a number can stand. The situation
+  is the app that took the reading ("Battery open"); worn or not, Follow my voice and Tidal playing are not known
+  without the phone. A time to charge needs a reading from the last 15 minutes.
+- **The band** has no level without the phone: one dim line in the top corner says "Band: See it in the Meta AI app"
+  and no number or bar is drawn.
+- **The screen.** One device, so its level leads at full width, with what it is doing beside it: "On battery",
+  "Charging", "Full" (100%), "Low: charge soon" (20% or less), "Very low: charge now" (5% or less), or "Last read
+  9:06 AM" for a kept reading when the glasses give no level now (dim, and never shown as charging: that is not known
+  from an old reading). Under it the time to charge, or in its place why there is none, in words with no number.
+- **Six statistics**, each a fact of the readings kept; one that cannot be worked out is words, never a number:
+  - *Used today*: every fall between one reading and the next since midnight, added up. Time when no app was open
+    can hide a charge, so when part of the day was not read it is a floor and says "at least".
+  - *Lowest today*: the lowest level read today and when it was first read.
+  - *On charge today*: time between two readings under 15 minutes apart that were both charging, so only charging
+    that an app saw ("None seen" otherwise; the glasses charge in their case, where no app is open).
+  - *Last full charge*: when the last run of readings at 100% began, in the 7 days kept. A full battery on its
+    charger can look to Chromium like "no data" and is then not a reading, so this can be later than the true time.
+  - *Average this week*: the week's fall over the week's measured time, by the rules of a row.
+  - *Measured today*: how long readings ran today, which says how much the rest stands on.
+- **How fast they drain** lists the week kept, by app; the three fastest get a row and the rest share one line
+  ("Also: Battery 12%, Quran Glass 9% an hour"), so the chart keeps its room. Because it is always the week, the
+  button under the chart changes the chart only and nothing above it moves.
+- **The chart** takes the height left. It is marked 100%, 50% and the 20% low line, with clock times along the time
+  axis, each midnight a dotted line named by its day, and day names under a week. A charge an app saw is green; time
+  when no app was open is a dotted line between the two real readings around it (green when the level rose more than
+  2 points across it: a charge nobody read); the level now is a dot (amber when low). Nothing is drawn that was not
+  read. An empty span says "No readings in the last 24 hours". The legend names only what is drawn.
+- **First open.** With no level and nothing kept the screen says why and what comes next ("Your glasses are not
+  giving this app their battery level right now. It shows here by itself as soon as they do."), and in a phone's or
+  computer's browser that the battery is read only on the glasses.
+- **Opening never flashes.** The first drawing waits for the battery's first answer, 0.7 s at most, so neither
+  "unavailable" nor an old dim level shows before the real one. A battery that never answers leaves the kept reading,
+  dim and dated.
+- **It cannot end in a blank screen.** A kept store that is not JSON, not a list or has broken rows is started again
+  clean on the next reading (real readings among them are kept). With storage off or full the readings of the visit
+  are held in memory (`window.bakarBatteryLog`) and drawn. A battery the browser refuses, or a level that is not a
+  number from 0 to 100%, is never shown or kept. If drawing throws, the screen says "Battery could not draw the rest"
+  with the level, and the next change draws everything again. If the code never arrives the page itself says "Battery
+  could not start". The service worker's copy (`battery-glass-v10`) opens the app with no network.
 - **Other apps can add readings.** `localStorage` is shared by every app on this origin, so one line in a sibling
   app's page keeps readings while that app is open, under its own name:
 
@@ -142,11 +177,16 @@ stays in this app's own storage there.
 
 ## Checks
 
-`python -m http.server 47641 --bind 127.0.0.1 --directory webapp`, then
-`python webapp/tests/battery_test.py [base_url] [shots_dir]` (set `BATTERY_TEST_VERBOSE=1` to print what each check
+`python3 -m http.server 47641 --bind 127.0.0.1 --directory .` in this folder, then
+`python3 tests/battery_test.py [base_url] [shots_dir]` (set `BATTERY_TEST_VERBOSE=1` to print what each check
 saw). It needs Python's `playwright` package and Chrome. Section O covers the glasses' own history (the logger,
 its bounds, storage that fails, gaps, never 0, charging, another app's name, and the Android path unchanged); with it
-1b, 1d and the cache check (v9) changed on purpose. The test fakes the brokers and the glasses' own battery, blocks service workers (a controlled page would load the
+1b, 1d and the cache check (v9) changed on purpose. Section Q (15 November 2026) covers the glasses' own screen: its
+layout, the six statistics on a fixed clock, the chart's marks, the first open, the words beside the level, and what
+cannot break (a corrupt store, storage off or full, a battery that throws or gives nonsense, code that never arrives,
+drawing that throws, no network: the one check that runs with the service worker on), an opening that does not
+flash, and a full store of 2000 readings. With it O5 to O8 changed on
+purpose for the new words, and the cache check is v10. The test fakes the brokers and the glasses' own battery, blocks service workers (a controlled page would load the
 real MQTT library), and plays the phone, so no message leaves the PC. It includes the Director's harness cases
 (B01-B05, T1-T3), which fail on 78e18cc, the first rechecks' cases (Director N11, N11r, N13; Photographer A-C), which
 fail on bccfc7c, and the Director's second recheck (R2d, R2e, R2f, R2h6 and R1 for "At this pace", H for the

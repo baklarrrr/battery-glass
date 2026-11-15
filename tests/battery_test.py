@@ -1,5 +1,8 @@
 """Battery (glasses app) tests. Section O (own history) covers the statistics drawn from the glasses' own readings
-with no phone; with it, 1b, 1d and the cache check (v9) changed on purpose, each saying why.
+with no phone; with it, 1b, 1d and the cache check (v9, now v10 with section Q) changed on purpose, each saying why.
+Section Q (the rounds of 15 November 2026) covers the glasses' own screen: its layout, statistics, chart, first open,
+and what cannot break (corrupt, full or missing storage, a battery that gives nonsense, code that never arrives, no
+network). With it O5-O8 changed on purpose for the new words, each saying why.
  The MQTT library and the glasses' own battery are replaced by fakes and the phone is
 played by the test, so no message leaves the PC. Service workers are blocked in every browser context: a page that a
 service worker controls would fetch the real MQTT library and reach the real brokers.
@@ -887,7 +890,7 @@ with sync_playwright() as p:
         description = "Check the battery level and charging status of your glasses."
         ok = (description in html and manifest["name"] == web_manifest["name"] == "Battery"
               and manifest["description"] == web_manifest["description"] == description
-              and "const CACHE = 'battery-glass-v9';" in sw)
+              and "const CACHE = 'battery-glass-v10';" in sw)
         check("D5 web and launcher metadata match the default glasses battery function", ok)
 
     for name, fn in [("D7 no link", case_no_link), ("D7 not enough", case_not_enough), ("D normal day", case_normal_day),
@@ -1628,6 +1631,10 @@ with sync_playwright() as p:
     LOCAL = f"{BASE}index.html?test=1"
     LOG = "JSON.parse(localStorage.getItem('bakar.battery.log') || '[]')"
 
+    # Changed on purpose (round 4, 15 November 2026): the empty list's line was "Not enough readings yet: an app needs
+    # about 30 minutes open in all"; under the heading "How fast they drain" it now reads plainly.
+    NO_RATE = "Shows after about 30 minutes with one app open"
+
     def local_page(log=None, level=None, charging=False, ctx=None):
         """The default launch (no Android link) with these readings already kept: [minutes ago, level, charging, app]."""
         pg = page_at(LOCAL, ctx=ctx)
@@ -1714,7 +1721,7 @@ with sync_playwright() as p:
         one = local_page(drain(220, 90, 87, 20) + drain(20, 86, 83, 20)[:1], level=0.86)  # a look after the gap
         v1 = view(one)
         close(one)
-        ok = (segs == 2 and v["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"]
+        ok = (segs == 2 and v["rows"] == [NO_RATE]
               and not v["notCounted"] and v["left"].startswith("At this pace: ") and abs(low_h - 7) < 0.75
               and v1["left"] == "" and v1["gPath"].count("M") == 1)
         check("O5 a gap while no app was open stays a gap: the chart breaks, no rate and no time is worked out across it",
@@ -1729,7 +1736,7 @@ with sync_playwright() as p:
         v2 = view(pg)
         close(pg)
         ok = (len(v["rows"]) == 1 and v["rows"][0].startswith("Battery open | over ") and v["rows"][0].endswith("| under 2% an hour")
-              and v["left"] == "" and v2["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"])
+              and v["left"] == "" and v2["rows"] == [NO_RATE])
         check("O6 no fall is \"under X% an hour\", never 0, and a jump of more than 2 points counts for nothing", ok, [v, v2])
 
     def case_o_charging():
@@ -1737,7 +1744,7 @@ with sync_playwright() as p:
         v = view(pg)
         close(pg)
         ok = (v["glassesNote"] == "Charging" and re.match(r"^80% around \d", v["left"] or "") is not None
-              and "charging" in v["glassesCls"] and v["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"])
+              and "charging" in v["glassesCls"] and v["rows"] == [NO_RATE])
         check("O7 while charging, the time for 80% comes from this charge's own readings", ok, v)
 
     def case_o_old_level():
@@ -1746,7 +1753,10 @@ with sync_playwright() as p:
         pg = local_page(drain(180, 90, 80, 60))
         v = view(pg)
         close(pg)
-        ok = (v["glasses"] == "80%" and "old" in v["glassesCls"] and v["state"].startswith("From your glasses · level from ")
+        # Changed on purpose (round 4): the date was on the top line ("From your glasses · level from 9:06 AM"), where
+        # it was cut short beside the band's line; it now sits beside the dim number it dates.
+        ok = (v["glasses"] == "80%" and "old" in v["glassesCls"] and v["state"] == "From your glasses"
+              and re.match(r"^Last read \d", v["glassesNote"])
               and v["left"] == "" and rate_of(v["rows"], "Battery open") is not None)
         check("O8 with no level now, the last kept reading is shown dim with its time, and gives no time to charge", ok, v)
 
@@ -1789,6 +1799,413 @@ with sync_playwright() as p:
     for name, fn in [("O1", case_o_logger), ("O2", case_o_bounded), ("O3", case_o_storage_fails), ("O4", case_o_stats),
                      ("O5", case_o_gap), ("O6", case_o_never_zero), ("O7", case_o_charging), ("O8", case_o_old_level),
                      ("O9", case_o_other_app), ("O10", case_o_android_unchanged)]:
+        guarded(name, fn)
+
+    # ---- Q. The rounds of 15 November 2026: the glasses' own screen (no Android link) -----------------------------
+    BOX = "(s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }"
+
+    def case_q_layout():
+        # One device to show: its level leads, the band is one line, and the chart takes the height the list leaves,
+        # with its own marks. The Android screen keeps its two columns and its 80 px chart with no marks.
+        pg = local_page(drain(90, 90, 72, 90), level=0.72)
+        plot, state, band, pct = [pg.evaluate(BOX, s) for s in (".plot", "#stateText", "#band", "#glasses .pct")]
+        marks = pg.evaluate("[...document.querySelectorAll('.yaxis span')].map((e) => e.textContent + ':' + getComputedStyle(e.parentElement).display)")
+        fits = pg.evaluate("document.documentElement.scrollHeight <= 600 && document.getElementById('main').scrollHeight <= 600")
+        close(pg)
+        pg = page_at(URL, connect=True)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        android = pg.evaluate("[getComputedStyle(document.querySelector('.yaxis')).display, document.getElementById('chart').getBoundingClientRect().height,"
+                              " getComputedStyle(document.querySelector('.chart .own')).display, getComputedStyle(document.querySelector('.levels')).display]")
+        close(pg)
+        ok = (plot[3] - plot[1] >= 120 and state[2] <= band[0] and pct[3] - pct[1] >= 60 and fits
+              and marks == ["100%:block", "50%:block", "20%:block"] and android == ["none", 80, "none", "grid"])
+        check("Q1 the glasses' own screen has no dead middle: the chart fills the height left, marked 100%, 50% and 20%; "
+              "the band's line clears the top line; the Android screen is laid out as before", ok, [plot, state, band, pct, marks, fits, android])
+
+    # A fixed clock for what depends on the day: Tuesday 10 November 2026, 3:00 PM in Toronto.
+    TUE_3PM = 1794340800000
+
+    def fixed_page(log, level=None, charging=False, at=TUE_3PM, url=None):
+        """The default launch at a fixed time, with these readings kept: [minutes before that time, level, charging, app]."""
+        ctx = new_context()
+        ctx.clock.set_fixed_time(at / 1000)
+        pg = page_at(url or LOCAL, ctx=ctx)
+        pg.evaluate("""([log, at]) => localStorage.setItem('bakar.battery.log',
+            JSON.stringify(log.map(([ago, l, c, a]) => [Math.round(at - ago * 60000), l, c, a])))""", [log, at])
+        pg.reload()
+        if level is not None:
+            pg.evaluate("([l, c]) => window.__setBattery(l, c)", [level, charging])
+        pg.wait_for_timeout(250)
+        return pg
+
+    STATS = "Object.fromEntries([...document.querySelectorAll('#stats dd')].map((e) => [e.id.slice(4), e.textContent + (e.classList.contains('none') ? ' (none)' : '')]))"
+
+    def case_q_stats():
+        # Monday evening a charge that reached 100% at 10:00 PM and was still read at 100% at 10:08. Tuesday: 9 to 10 AM from 98% to 86%; nothing until a charge seen from 1:00
+        # to 1:40 PM, 50% to 70%; then 2 to 3 PM from 70% to 60%, up to now.
+        log = (drain(18 * 60, 60, 100, 60, charging=1) + [[17 * 60 - 4, 100, 1, "Battery"], [17 * 60 - 8, 100, 0, "Battery"]]
+               + drain(6 * 60, 98, 86, 60) + drain(120, 50, 70, 40, charging=1) + drain(60, 70, 60, 60))
+        pg = fixed_page(log, level=0.60)
+        s = pg.evaluate(STATS)
+        shown = pg.evaluate("!document.getElementById('stats').hidden")
+        fits = pg.evaluate("[...document.querySelectorAll('#stats dd, #stats dt')].every((e) => e.scrollWidth <= e.clientWidth + 1)")
+        shot(pg, "Q2-statistics")
+        close(pg)
+        week = re.match(r"^(\d+)% an hour$", s.get("Week", ""))
+        ok = (shown and fits and s["Used"] == "at least 58%" and s["Low"] == "50% at 1:00 PM" and s["Charge"] == "40 min"
+              and s["Full"] == "Mon 10:00 PM" and week and abs(int(week.group(1)) - 11) <= 1 and s["Seen"] == "2 h 40 min")
+        check("Q2 statistics from the glasses' own readings: used today (a floor when part of the day was not read), the "
+              "lowest level today and when, time seen on charge, the last reading at 100%, the week's average, and how "
+              "long readings ran today", bool(ok), [s, shown, fits])
+
+    def case_q_stats_honest():
+        # One reading, just now: nothing can be worked out, and every value says so in words, never a number.
+        pg = fixed_page([[0, 64, 0, "Battery"]], level=0.64)
+        s = pg.evaluate(STATS)
+        close(pg)
+        # Readings from yesterday only: nothing is said about today.
+        pg = fixed_page(drain(26 * 60, 90, 80, 60))
+        y = pg.evaluate(STATS)
+        close(pg)
+        # With an Android link the statistics block is not drawn at all.
+        pg = page_at(URL, connect=True)
+        d = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(d), d.out)
+        android = pg.evaluate("document.getElementById('stats').hidden")
+        close(pg)
+        ok = (s == {"Used": "Nothing yet (none)", "Low": "64% at 3:00 PM", "Charge": "None seen (none)", "Full": "Not seen this week (none)",
+                    "Week": "Not enough yet (none)", "Seen": "Under a minute (none)"}
+              and y["Used"] == "No readings yet (none)" and y["Low"] == "No readings yet (none)" and y["Seen"] == "Under a minute (none)"
+              and re.match(r"^\d+% an hour$", y["Week"]) and android)
+        check("Q3 a statistic that cannot be worked out is words, never a number; nothing is said about a day with no "
+              "readings; with an Android link the block is not drawn", bool(ok), [s, y, android])
+
+    CHART = """() => {
+      const d = (id) => document.getElementById(id).getAttribute('d') || '';
+      const boxes = [...document.querySelectorAll('.chartlabels span')].filter((e) => e.textContent && e.id !== 'xTicks')
+        .map((e) => { const r = e.getBoundingClientRect(); return [e.textContent, Math.round(r.left), Math.round(r.right)]; }).sort((a, b) => a[1] - b[1]);
+      return { charge: d('lineCharge').split('M').length - 1, unseen: d('lineUnseen').split('M').length - 1, up: d('lineUnseenUp').split('M').length - 1,
+        now: d('dotNow'), nowCls: document.getElementById('dotNow').getAttribute('class'), days: d('dayLines').split('M').length - 1,
+        labels: boxes.map((b) => b[0]), overlap: boxes.some((b, i) => i && b[1] < boxes[i - 1][2] + 2),
+        keys: [...document.querySelectorAll('.key .k')].filter((e) => !e.hidden).map((e) => e.textContent),
+        note: document.getElementById('chartNote').hidden ? '' : document.getElementById('chartNote').textContent };
+    }"""
+
+    def case_q_chart():
+        # The day of Q2. The charge seen is green; the three spells with no app open are dotted between the readings
+        # around them (none of them a rise); the level now is a dot; the axis is marked on the clock, midnight by day.
+        log = (drain(3 * 1440 + 600, 80, 70, 60) + drain(18 * 60, 60, 100, 60, charging=1) + drain(6 * 60, 98, 86, 60)
+               + drain(120, 50, 70, 40, charging=1) + drain(60, 70, 60, 60))
+        pg = fixed_page(log, level=0.60)
+        c = pg.evaluate(CHART)
+        g = view(pg)["gPath"]
+        shot(pg, "Q4-chart-day")
+        pg.keyboard.press("Enter")
+        pg.wait_for_timeout(200)
+        wk = pg.evaluate(CHART)
+        shot(pg, "Q4-chart-week")
+        close(pg)
+        # A rise while no app was open is a charge nobody read: dotted and green. A low level now is an amber dot.
+        pg = fixed_page(drain(300, 40, 30, 60) + drain(60, 25, 15, 60), level=0.15)
+        low = pg.evaluate(CHART)
+        close(pg)
+        pg = fixed_page(drain(300, 40, 30, 60) + drain(60, 80, 70, 60), level=0.70)
+        up = pg.evaluate(CHART)
+        close(pg)
+        ok = (c["charge"] >= 20 and c["unseen"] == 3 and c["up"] == 0 and c["now"] and "low" not in c["nowCls"] and c["days"] == 1
+              and g.count("M") == 4 and c["keys"] == ["Glasses", "Charging", "No app open"] and not c["overlap"]
+              and c["labels"][0] == "Mon 9:00 PM" and "6 AM" in c["labels"] and c["labels"][-1] == "now" and c["note"] == ""
+              and not wk["overlap"] and wk["labels"] == ["Sat", "Sun", "Mon", "Tue", "now"] and wk["days"] == 3 and wk["unseen"] == 4
+              and "low" in low["nowCls"] and low["keys"] == ["Glasses", "No app open"] and low["up"] == 0
+              and up["up"] == 1 and up["keys"] == ["Glasses", "Charging", "No app open"])
+        check("Q4 the chart reads at a glance: a charge is green, time with no app open is dotted between two real readings "
+              "(green when the level rose across it), the level now is a dot, and the axis carries clock and day marks "
+              "that never touch", ok, [c, g.count("M"), wk, low, up])
+
+    def case_q_chart_empty():
+        # Nothing in the span: the chart says so. The Android chart draws none of the marks.
+        pg = fixed_page(drain(30 * 60, 90, 80, 60))
+        c = pg.evaluate(CHART)
+        close(pg)
+        pg = page_at(URL, connect=True)
+        d = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(d), d.out)
+        a = pg.evaluate(CHART)
+        vis = pg.evaluate("[getComputedStyle(document.getElementById('xTicks')).display, getComputedStyle(document.getElementById('chartNote')).display, getComputedStyle(document.getElementById('dotNow')).display]")
+        close(pg)
+        ok = (c["note"] == "No readings in the last 24 hours" and not c["now"]
+              and a["charge"] == 0 and a["unseen"] == 0 and a["up"] == 0 and a["now"] == "" and a["keys"] == ["Glasses", "Band"]
+              and vis == ["none", "none", "none"])
+        check("Q5 an empty chart says there are no readings in the span; with an Android link none of the new marks is drawn",
+              ok, [c, a, vis])
+
+    def case_q_first_open():
+        # No level and nothing kept: the screen says why and what happens next, on the glasses and off them; a real
+        # reading then draws the full screen with no reload.
+        pg = local_page()
+        g = pg.evaluate("[document.getElementById('localLevel').textContent, document.getElementById('localWhy').textContent, document.getElementById('localNext').textContent]")
+        fits = pg.evaluate("document.getElementById('unpaired').scrollHeight <= 600 && document.documentElement.scrollWidth <= 600")
+        pg.evaluate("window.__setBattery(0.64, false)")
+        pg.wait_for_timeout(250)
+        v = view(pg)
+        c = pg.evaluate(CHART)
+        hint = pg.evaluate("[document.getElementById('leftHint').hidden, document.getElementById('leftHint').textContent, document.getElementById('leftHint').getBoundingClientRect().height]")
+        close(pg)
+        phone = page_at(LOCAL, ctx=new_context("Mozilla/5.0 (iPhone; CPU iPhone OS 27_2 like Mac OS X)"))
+        phone.evaluate("window.__setBattery(0.92, true)")
+        ph = phone.evaluate("[document.getElementById('localLevel').textContent, document.getElementById('localWhy').textContent, document.getElementById('main').hidden]")
+        close(phone)
+        ok = (g[0] == "Glasses level unavailable." and "as soon as they do" in g[1] and "Meta AI app" in g[2] and fits
+              and v["glasses"] == "64%" and v["glassesNote"] == "On battery" and v["rows"] == [NO_RATE] and v["left"] == ""
+              and hint == [False, "When to charge shows once the level has moved a few times", 24]
+              and c["note"] == "The line grows while one of your apps is open" and c["now"]
+              and ph[0] == "Glasses level unavailable." and "only on the glasses" in ph[1] and ph[2] is True)
+        check("Q6 the first open is never two bare lines: with no level it says why and what comes next (on the glasses, "
+              "and in a phone's browser); with a first level every empty part says what it is waiting for", ok, [g, fits, v, c, hint, ph])
+
+    def case_q_notes():
+        def note(log, level=None, charging=False):
+            pg = local_page(log, level=level, charging=charging)
+            v = view(pg)
+            hint = pg.evaluate("document.getElementById('leftHint').hidden ? '' : document.getElementById('leftHint').textContent")
+            close(pg)
+            return [v["glasses"], v["glassesNote"], v["glassesCls"], v["left"], hint]
+        full = note([[20, 100, 0, "Battery"], [2, 100, 0, "Battery"]], level=1.0)
+        low = note(drain(60, 30, 18, 60), level=0.18)
+        very = note(drain(60, 15, 4, 60), level=0.04)
+        past = note(drain(30, 70, 90, 30, charging=1), level=0.90, charging=True)
+        # The last reading kept was charging, three hours ago, and there is no level now: nothing says "Charging".
+        was = note(drain(240, 40, 60, 30, charging=1))
+        ok = (full[:2] == ["100%", "Full"] and full[4] == ""
+              and low[1] == "Low: charge soon" and "low" in low[2] and low[3].startswith("At this pace: empty around ")
+              and very[1] == "Very low: charge now" and "low" in very[2]
+              and past[1] == "Charging" and past[3] == "" and past[4] == "Past 80%: the charge slows from here, so no time is given"
+              and was[0] == "60%" and re.match(r"^Last read \d", was[1]) and "charging" not in was[2] and "old" in was[2]
+              and was[4] == "The glasses are not giving a level right now")
+        check("Q7 beside the level: Full at 100%, Low and Very low with what to do, an old reading with its time and never "
+              "as charging now; where no time can be worked out the line says why, with no number", bool(ok), [full, low, very, past, was])
+
+    # Readings five minutes apart without waiting: the page's clock is moved on before each.
+    READ = """(levels) => { const real = Date.now; levels.forEach((l, i) => { Date.now = () => real() + i * 5 * 60000; window.__setBattery(l, false); }); }"""
+
+    def case_q_heals():
+        # A store that is not JSON, not a list, or holds broken rows: the next reading starts it again clean, keeping
+        # the rows that are readings. Before, a store that could not be parsed stayed broken for good.
+        out = []
+        for raw in ['{"not":"a list', '{"a":1}', 'null', '"text"',
+                    json.dumps([None, 5, "x", [1, 2], ["a", "b", 0, 0], {"at": 3}, [9e99, 50, 0, "Battery"], [0, 500, 0, "B"], ["1", "50", 0, "B"]])]:
+            pg = page_at(LOCAL)
+            pg.evaluate("(r) => localStorage.setItem('bakar.battery.log', r)", raw)
+            pg.reload()
+            pg.evaluate(READ, [0.64, 0.63, 0.62])
+            pg.wait_for_timeout(200)
+            # The line: the three readings and the level carried to now.
+            out.append([pg.evaluate(f"{LOG}.map((r) => r[1])"), view(pg)["glasses"], len(path_pts(view(pg)["gPath"]))])
+            close(pg)
+        # Good rows among broken ones are kept.
+        pg = page_at(LOCAL)
+        pg.evaluate("""() => { const now = Date.now(); localStorage.setItem('bakar.battery.log', JSON.stringify([null, [now - 600000, 70, 0, 'Battery'],
+            'x', [now - 300000, 69, 0, 'Battery'], [now + 9e6, 10, 0, 'Battery'], [now - 200000, 'full', 0, 'Battery']])); }""")
+        pg.reload()
+        pg.evaluate("window.__setBattery(0.68, false)")
+        pg.wait_for_timeout(200)
+        mixed = pg.evaluate(f"{LOG}.map((r) => r[1])")
+        close(pg)
+        check("Q8 a kept store that is corrupt heals itself on the next reading: not JSON, not a list, or broken rows; "
+              "real readings among them are kept", all(o == [[64, 63, 62], "62%", 4] for o in out) and mixed == [70, 69, 68], [out, mixed])
+
+    def case_q_storage():
+        # Storage that throws on every call: the readings of this visit are still drawn, from memory.
+        ctx = new_context()
+        ctx.add_init_script("Storage.prototype.setItem = () => { throw new Error('full'); }; Storage.prototype.getItem = () => { throw new Error('off'); };")
+        before = len(errors)
+        pg = page_at(LOCAL, ctx=ctx)
+        pg.evaluate(READ, [0.64, 0.63, 0.62, 0.61])
+        pg.wait_for_timeout(200)
+        off = [view(pg)["glasses"], len(path_pts(view(pg)["gPath"])), pg.evaluate(STATS)["Used"]]
+        close(pg)
+        # Storage that is full (reads work, writes throw): new readings still count, on top of what was kept.
+        pg = local_page([[30 - i * 5, 70 - i, 0, "Battery"] for i in range(6)])
+        pg.evaluate("() => { Storage.prototype.setItem = () => { throw new DOMException('full', 'QuotaExceededError'); }; }")
+        pg.evaluate(READ, [0.64, 0.63, 0.62, 0.61])
+        pg.wait_for_timeout(200)
+        full = [view(pg)["glasses"], len(path_pts(view(pg)["gPath"])), pg.evaluate(STATS)["Low"][:3]]
+        close(pg)
+        check("Q9 storage that is off or full loses nothing on screen: this visit's readings are kept in memory and drawn, "
+              "and nothing throws", off == ["61%", 5, "at least 3%"] and full[0] == "61%" and full[1] >= 10 and full[2] == "61%"
+              and len(errors) == before, [off, full, errors[before:]])
+
+    def case_q_no_level():
+        # A battery the browser refuses, or one that gives nonsense: never a blank screen, never a level.
+        out = {}
+        before = len(errors)
+        for name, init, level in [
+                ("throws", "Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { throw new Error('nope'); } });", None),
+                ("not a promise", "Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { return 5; } });", None),
+                ("rejects", "Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { return Promise.reject(new Error('no')); } });", None),
+                ("not a number", None, "NaN"), ("over 100%", None, "1.7"), ("below 0", None, "-0.2"), ("text", None, "'full'")]:
+            ctx = new_context()
+            if init:
+                ctx.add_init_script(init)
+            pg = page_at(LOCAL, ctx=ctx)
+            if level:
+                pg.evaluate(f"window.__setBattery({level}, false)")
+            pg.wait_for_timeout(200)
+            out[name] = pg.evaluate(f"[!document.getElementById('unpaired').hidden, document.getElementById('localLevel').textContent, document.querySelector('#glasses .pct').textContent, {LOG}.length]")
+            close(pg)
+        check("Q10 a battery the browser refuses, or a level that is not a number from 0 to 100%, is never shown or kept "
+              "and never leaves a blank screen", all(v == [True, "Glasses level unavailable.", "—", 0] for v in out.values())
+              and len(errors) == before, [out, errors[before:]])
+
+    def case_q_never_blank():
+        # The app's code never arrives: the page itself says so. Drawing throws: the screen says so with the level, and
+        # the next change draws everything again.
+        ctx = new_context()
+        ctx.route("**/app.js", lambda r: r.abort())
+        pg = ctx.new_page()
+        pg.goto(LOCAL)
+        pg.wait_for_timeout(300)
+        gone = pg.evaluate("[!document.getElementById('unpaired').hidden, document.getElementById('localLevel').textContent, document.getElementById('localWhy').textContent]")
+        close(pg)
+        before = len(errors)
+        pg = local_page(drain(90, 90, 72, 90), level=0.72)
+        pg.evaluate("() => { window.__stats = renderStats; window.renderStats = () => { throw new Error('broken'); }; version++; render(); }")
+        broke = pg.evaluate("[!document.getElementById('unpaired').hidden, document.getElementById('main').hidden, document.getElementById('localLevel').textContent, document.getElementById('localWhy').textContent]")
+        shot(pg, "Q11-could-not-draw")
+        pg.evaluate("() => { window.renderStats = window.__stats; version++; render(); }")
+        back = [pg.evaluate("document.getElementById('unpaired').hidden && !document.getElementById('main').hidden"), view(pg)["glasses"], len(view(pg)["rows"])]
+        close(pg)
+        ok = (gone == [True, "Battery could not start.", "Check the connection, then close Battery and open it again."]
+              and broke == [True, True, "Glasses 72%", "Battery could not draw the rest. Close it and open it again."]
+              and back == [True, "72%", 1] and len(errors) == before)
+        check("Q11 nothing ends in a blank screen: code that never arrives and drawing that throws both say so in plain "
+              "words (with the level when there is one), and the screen comes back by itself", ok, [gone, broke, back, errors[before:]])
+
+    def case_q_offline():
+        # With the service worker (allowed in this one context; with no Android link the page opens no broker), the
+        # app opens with no network at all, from the copy kept on the glasses.
+        ctx = browser.new_context(viewport={"width": 600, "height": 600}, service_workers="allow", locale="en-US", timezone_id="America/Toronto",
+                                  user_agent="Mozilla/5.0 (Linux; Android 14; Greatwhite) AppleWebKit/537.36 Chrome/151.0 Mobile Safari/537.36")
+        ctx.add_init_script(FAKE_BATTERY)
+        ctx.route("**/vendor/mqtt.min.js", lambda r: r.fulfill(status=200, content_type="application/javascript", body=FAKE_MQTT))
+        pg = ctx.new_page()
+        pg.on("pageerror", lambda e: errors.append(str(e)))
+        pg.goto(LOCAL)
+        pg.evaluate("() => navigator.serviceWorker.ready.then(() => new Promise((done) => { const wait = () => (navigator.serviceWorker.controller ? done() : setTimeout(wait, 50)); wait(); }))")
+        pg.evaluate("window.__setBattery(0.64, false)")
+        pg.wait_for_timeout(200)
+        ctx.set_offline(True)
+        pg.reload()
+        pg.evaluate("window.__setBattery(0.63, false)")
+        pg.wait_for_timeout(300)
+        v = view(pg)
+        styled = pg.evaluate("getComputedStyle(document.body).backgroundColor")
+        started = pg.evaluate("window.batteryStarted === true && window.__clients.length === 0")
+        ctx.close()
+        check("Q12 the app opens with no network, from the copy the service worker keeps, and still reads and keeps the level",
+              v["glasses"] == "63%" and v["state"] == "From your glasses" and styled == "rgb(0, 0, 0)" and started, [v, styled, started])
+
+    def case_q_many_apps():
+        # Six apps with a rate each, one with the longest name the logger keeps (24 letters): the three fastest get a
+        # row, the rest share one line, and the chart and the button keep their room. Nothing is cut or scrolls.
+        log = (drain(700, 99, 79, 75, app="Tidal Glass") + drain(600, 78, 68, 67, app="Quran Glass") + drain(500, 67, 47, 60, app="Sound Lab")
+               + drain(400, 46, 32, 60, app="Bakar Studio Director XL") + drain(300, 31, 24, 60, app="Bakar Home") + drain(100, 23, 9, 70))
+        pg = local_page(log, level=0.09)
+        v = view(pg)
+        boxes = {s: pg.evaluate(BOX, s) for s in ("#span", ".plot", "#usesGlasses", "#stats")}
+        clipped = pg.evaluate("[...document.querySelectorAll('#main *')].filter((e) => e.clientWidth && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== 'visible').map((e) => e.id || e.className)")
+        scroll = pg.evaluate("[document.documentElement.scrollHeight, document.documentElement.scrollWidth, document.getElementById('main').scrollHeight]")
+        shot(pg, "Q13-six-apps")
+        close(pg)
+        ok = (len(v["rows"]) == 4 and v["rows"][0].startswith("Sound Lab open") and v["rows"][2].startswith("Bakar Studio Director XL open")
+              and v["rows"][3].startswith("Also: Battery ") and "Quran Glass" in v["rows"][3] and v["rows"][3].endswith("% an hour")
+              and boxes["#span"][3] <= 600 - 20 and boxes[".plot"][3] - boxes[".plot"][1] >= 64 and boxes[".plot"][1] >= boxes["#usesGlasses"][3]
+              and clipped == [] and scroll == [600, 600, 600])
+        check("Q13 with six apps the three fastest get a row and the rest share one line; the chart and the button keep "
+              "their room and nothing is cut", ok, [v["rows"], boxes, clipped, scroll])
+
+    def case_q_steady():
+        # Pressing the button changes the chart only: a rate measured three days ago is listed in both spans, and
+        # nothing above the chart moves. What is beside the level stays put from 9% to 64%.
+        pg = fixed_page(drain(3 * 1440 + 600, 80, 60, 60, app="Tidal Glass") + drain(90, 90, 72, 90), level=0.72)
+        parts = ("#stats", ".uses", ".plot", "#span", "#glassesNote")
+        day = [view(pg)["rows"], [pg.evaluate(BOX, s) for s in parts], pg.evaluate("document.getElementById('since').textContent")]
+        pg.keyboard.press("Enter")
+        pg.wait_for_timeout(200)
+        week = [view(pg)["rows"], [pg.evaluate(BOX, s) for s in parts], pg.evaluate("document.getElementById('since').textContent")]
+        focus = pg.evaluate("[document.activeElement.id, getComputedStyle(document.getElementById('span')).borderTopColor]")
+        pg.evaluate("__setBattery(0.09, false)")
+        pg.wait_for_timeout(150)
+        nine = pg.evaluate(BOX, "#glassesNote")[0]
+        # Calm: the statistics rest with the list; the level never does.
+        pg.evaluate("lastInputAt = Date.now() - 20000; checkCalm(); render();")
+        calm = pg.evaluate("[__eff('#statLow'), __eff('#statFull'), __eff('#glasses .pct'), __eff('#usesGlasses .rate')]")
+        close(pg)
+        ok = (day[0] == week[0] and len(day[0]) == 2 and day[1] == week[1] and day[2] != week[2]
+              and focus == ["span", WHITE] and nine == day[1][4][0] and calm == [0.55, 1, 1, 0.55])
+        check("Q14 nothing jumps: the button changes the chart only (the list is the week kept), what is beside the level "
+              "stays put, the button keeps a white ring, and in calm the statistics rest with the list", ok, [day, week, focus, nine, calm])
+
+    def case_q_small_rise():
+        # A level two points higher after time nobody read is not called a charge; five points higher is.
+        pg = local_page(drain(120, 60, 55, 30) + drain(30, 57, 54, 30), level=0.54)
+        small = pg.evaluate(CHART)
+        close(pg)
+        pg = local_page(drain(120, 60, 55, 30) + drain(30, 60, 57, 30), level=0.57)
+        big = pg.evaluate(CHART)
+        close(pg)
+        check("Q15 a rise of a point or two across time nobody read is not drawn or named as a charge",
+              small["up"] == 0 and small["unseen"] == 1 and small["keys"] == ["Glasses", "No app open"]
+              and big["up"] == 1 and "Charging" in big["keys"], [small, big])
+
+    def case_q_no_flash():
+        # A battery that answers 300 ms after the page opens, with readings kept from an hour ago: until it answers
+        # nothing is drawn (no "unavailable", no old dim level), then the real level comes up bright, once.
+        slow = """(() => { const b = { level: 0.64, charging: false, chargingTime: Infinity, dischargingTime: 7200, addEventListener() {}, removeEventListener() {} };
+          Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { return new Promise((done) => setTimeout(() => done(b), %d)); } }); })();"""
+        seen = """() => { window.__seen = []; const look = () => { window.__seen.push([document.getElementById('unpaired').hidden, document.getElementById('main').hidden,
+          document.querySelector('#glasses .pct').textContent, document.getElementById('glasses').className.includes('old')].join()); requestAnimationFrame(look); }; look(); }"""
+        ctx = new_context()
+        pg = page_at(LOCAL, ctx=ctx)
+        pg.evaluate("""() => { const now = Date.now(); localStorage.setItem('bakar.battery.log', JSON.stringify([[now - 3600000, 70, 0, 'Battery'], [now - 3540000, 70, 0, 'Battery', 1]])); }""")
+        ctx.add_init_script(slow % 300)
+        ctx.add_init_script("document.addEventListener('DOMContentLoaded', " + seen + ")")
+        pg.reload()
+        pg.wait_for_timeout(700)
+        states = pg.evaluate("[...new Set(window.__seen)]")
+        close(pg)
+        # A battery that never answers: after the wait the kept reading is drawn, dim and dated; nothing hangs.
+        ctx = new_context()
+        ctx.add_init_script(slow % 60000)
+        pg = page_at(LOCAL, ctx=ctx)
+        pg.evaluate("""() => { const now = Date.now(); localStorage.setItem('bakar.battery.log', JSON.stringify([[now - 3600000, 70, 0, 'Battery'], [now - 3540000, 70, 0, 'Battery', 1]])); }""")
+        pg.reload()
+        pg.wait_for_timeout(1000)
+        never = [view(pg)["glasses"], "old" in view(pg)["glassesCls"], view(pg)["glassesNote"][:9]]
+        close(pg)
+        check("Q16 opening never flashes: nothing is drawn until the battery first answers (0.7 s at most), so neither "
+              "\"unavailable\" nor an old dim level shows before the real one; a battery that never answers leaves the kept reading",
+              states == ["true,true,—,false", "true,false,64%,false"] and never == ["70%", True, "Last read"], [states, never])
+
+    def case_q_full_store():
+        # The most the logger keeps: 2000 readings over 7 days. Both spans draw quickly and nothing is cut.
+        log = [[7 * 1440 - 60 - i * 5, 100 - (i % 80), 1 if i % 80 > 70 else 0, ["Battery", "Tidal Glass", "Sound Lab"][(i // 80) % 3]] for i in range(1999)]
+        pg = local_page(log, level=0.5)
+        ms = pg.evaluate("() => { const t = performance.now(); for (let i = 0; i < 4; i++) { document.getElementById('span').click(); } return (performance.now() - t) / 4; }")
+        scroll = pg.evaluate("[document.documentElement.scrollHeight, document.documentElement.scrollWidth, document.getElementById('main').scrollHeight]")
+        kept = pg.evaluate(f"{LOG}.length")
+        pg.keyboard.press("Enter")
+        pg.wait_for_timeout(200)
+        shot(pg, "Q17-full-store-week")
+        close(pg)
+        check("Q17 a full store (2000 readings over 7 days) draws either span in well under half a second, stays at 2000 "
+              "and nothing is cut", ms < 300 and scroll == [600, 600, 600] and kept == 2000, [round(ms), scroll, kept])
+
+    for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest), ("Q4", case_q_chart), ("Q5", case_q_chart_empty),
+                     ("Q6", case_q_first_open), ("Q7", case_q_notes), ("Q8", case_q_heals), ("Q9", case_q_storage), ("Q10", case_q_no_level),
+                     ("Q11", case_q_never_blank), ("Q12", case_q_offline), ("Q13", case_q_many_apps), ("Q14", case_q_steady),
+                     ("Q15", case_q_small_rise), ("Q16", case_q_no_flash), ("Q17", case_q_full_store)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)

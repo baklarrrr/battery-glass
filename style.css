@@ -41,6 +41,10 @@ main { block-size: 100%; }
 h1 { margin: 0; font-size: 34px; font-weight: 600; }
 h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); letter-spacing: 0.02em; }
 .say { margin: 0; font-size: 22px; }
+/* Under "Glasses level unavailable.": why, and what happens next, so the first screen is never two bare lines. */
+.why { margin: 0; max-inline-size: 500px; font-size: 18px; line-height: 1.4; color: var(--soft); }
+.why:empty { display: none; }
+#localNext { color: var(--dim); }
 
 /* ---- top line ------------------------------------------------------------------------------------ */
 .topline { display: flex; align-items: center; min-block-size: 22px; font-size: 15px; color: var(--dim); }
@@ -67,10 +71,52 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 
 /* No Android link: the band has no level to show, so its number and bar are not drawn; one line says why. */
 #main.local #band .pct, #main.local #band .bar { display: none; }
-#main.local #band .name { color: var(--dim); }
-#main.local #band { align-content: end; }
+
+/* ---- the glasses' own readings (no Android link) -------------------------------------------------------
+   One device to show, so its level leads at full width: the number, what it is doing beside it, the bar under both.
+   The band is one dim line in the top corner. The chart takes whatever height the list leaves, so the screen is
+   never half empty, and carries its own marks: 100%, 50% and the 20% low line. */
+#main.local { position: relative; gap: 12px; }
+#main.local .levels { display: block; }
+#main.local #band { position: absolute; inset-block-start: 24px; inset-inline-end: 30px; display: flex; gap: 5px; align-items: baseline; min-block-size: 22px; }
+#main.local #band .name, #main.local #band .note { font-size: 14px; line-height: 22px; min-block-size: 0; color: var(--dim); white-space: nowrap; }
+#main.local #band .name::after { content: ":"; }
+#main.local .state { max-inline-size: 310px; }
+#main.local #glasses { grid-template-columns: auto 1fr; grid-template-areas: "pct name" "pct note" "bar bar"; column-gap: 16px; row-gap: 0; align-items: center; }
+#main.local #glasses .pct { grid-area: pct; font-size: 64px; min-inline-size: 3.55ch; } /* "8%" to "88%": what is beside it stays put */
+#main.local #glasses .name { grid-area: name; align-self: end; font-size: 15px; color: var(--dim); }
+#main.local #glasses .note { grid-area: note; align-self: start; font-size: 19px; line-height: 26px; min-block-size: 26px; color: var(--soft); }
+#main.local #glasses.charging .note { color: var(--accent); }
+#main.local #glasses.low .note { color: var(--low); }
+#main.local #glasses .bar { grid-area: bar; block-size: 8px; border-radius: 4px; margin-block-start: 10px; }
+#main.local .uses { flex: 0 0 auto; display: grid; grid-template-columns: auto 1fr; align-items: baseline; }
+#main.local .uses .list { grid-column: 1 / -1; grid-row: 2; }
+#main.local .uses .aside { grid-column: 2; grid-row: 1; margin: 0 0 6px; text-align: end; font-size: 14px; }
+/* What the readings say about today and the week: six small facts, each a dim label over its value. A value that
+   cannot be worked out yet is words, dim, never a number. */
+.stats { display: grid; grid-template-columns: 1fr 1.15fr 1fr; column-gap: 14px; row-gap: 8px; margin: 0; }
+.stats dt { font-size: 14px; line-height: 17px; color: var(--dim); white-space: nowrap; }
+.stats dd { margin: 0; font-size: 17px; line-height: 22px; font-weight: 600; color: var(--soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stats dd.none { font-weight: 400; color: var(--dim); }
+#main.local .foot { flex: 1; min-block-size: 0; display: flex; flex-direction: column; gap: 6px; }
+#main.local .plot { flex: 1; min-block-size: 64px; position: relative; margin-inline-start: 40px; }
+#main.local .chart { position: absolute; inset: 0; block-size: 100%; }
+#main.local .chartlabels { margin-inline-start: 40px; margin-block-end: 2px; }
+#main.local .yaxis { display: block; }
+#main.local .chartlabels { position: relative; font-size: 14px; }
+#main.local .xticks { display: block; position: absolute; inset: 0; }
+#main.local .xticks span { position: absolute; inset-block-start: 0; transform: translateX(-50%); white-space: nowrap; }
+#main.local .chartnote { display: block; position: absolute; inset-inline-start: 50%; transform: translateX(-50%); margin: 0; padding: 0 10px; background: #000; white-space: nowrap; font-size: 15px; color: var(--dim); }
+#main.local .key { gap: 12px; font-size: 14px; }
+#main.local button { min-inline-size: 142px; } /* "Last 24 hours" and "Last 7 days": one width */
+#main.local .key .k { gap: 6px; }
+#main.local .chart .own { display: inline; }
+#main.local .chart .mid, #main.local .chart .axis { vector-effect: non-scaling-stroke; }
+#main.local .chart .mid { stroke-dasharray: 2 6; }
 
 .left { margin: 0; font-size: 18px; color: var(--soft); min-block-size: 24px; }
+/* In the time line's place when no time can be worked out from the glasses' own readings: why, in dim words. */
+.left.hint { font-size: 16px; line-height: 24px; color: var(--dim); white-space: nowrap; }
 
 /* ---- how fast they drain ------------------------------------------------------------------------------
    One line per situation, so all six and the "Not counted" line fit: what, how long it was measured, the rate. The
@@ -82,10 +128,31 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 .list .over { font-size: 14px; color: var(--dim); white-space: nowrap; text-align: end; }
 .list .rate { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: end; }
 .list .empty { display: block; color: var(--dim); }
+.list .more { display: block; font-size: 14px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aside { margin: 8px 0 0; font-size: 14px; line-height: 1.3; color: var(--dim); }
 
 /* ---- chart and the one control ----------------------------------------------------------------------- */
 .foot { display: grid; gap: 8px; }
+.plot { display: grid; }
+.yaxis, .chart .own { display: none; }
+.yaxis { position: absolute; inset-block: 0; inset-inline-start: -40px; inline-size: 34px; }
+.yaxis span { position: absolute; inset-inline-end: 0; transform: translateY(-50%); font-size: 14px; line-height: 1; color: var(--dim); font-variant-numeric: tabular-nums; }
+.yaxis .lowmark { color: var(--low); opacity: 0.8; }
+.xticks, .chartnote { display: none; }
+/* The glasses' own chart: a charge is green (seen charging, solid; a rise while no app was open, dotted), time when
+   no app was open is a dim dotted line between the two readings around it, and the level now is a dot at the end. */
+.chart .line.charge { stroke: var(--accent); }
+.chart .gapline { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-dasharray: 1 5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.chart .gapline.up { stroke: var(--accent); }
+.chart .dots.now { stroke: var(--ink); stroke-width: 8; }
+.chart .dots.now.charging { stroke: var(--accent); }
+.chart .dots.now.low { stroke: var(--low); }
+.chart .ticks { fill: none; stroke: var(--dim); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart .daylines { fill: none; stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
+.sw.charge { border-block-start-color: var(--accent); }
+.sw.unseen { border-block-start: 2px dotted var(--dim); }
+.chart .top { stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 6; vector-effect: non-scaling-stroke; }
+.chart .lowline { stroke: var(--low); stroke-opacity: 0.55; stroke-width: 1; stroke-dasharray: 2 6; vector-effect: non-scaling-stroke; }
 .chart { inline-size: 100%; block-size: 80px; overflow: visible; } /* a dot at 100% is not cut at the top */
 .chart .mid { stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 6; }
 .chart .axis { stroke: var(--hair); stroke-width: 1; }
@@ -123,6 +190,7 @@ button:focus-visible, button:focus { border-color: var(--ink); }
    white (Photographer recheck 3, S2). The two levels, a low level, the warning and a top line dating the phone's last
    word never dim (S1); the focus ring rests: still white and thin, dimmer, never a glow. The first input wakes it. */
 body.calm #main:not(.stale) .state:not(.warn), body.calm .list .what, body.calm .list .rate, body.calm .chart,
+body.calm .stats dd:not(.none),
 body.calm .key .sw { opacity: 0.55; }
 body.calm button { border-color: rgba(255, 255, 255, 0.16); color: var(--dim); }
 body.calm button:focus, body.calm button:focus-visible { border-color: rgba(255, 255, 255, 0.5); }
