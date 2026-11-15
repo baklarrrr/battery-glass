@@ -1,4 +1,6 @@
-"""Battery (glasses app) tests. The MQTT library and the glasses' own battery are replaced by fakes and the phone is
+"""Battery (glasses app) tests. Section O (own history) covers the statistics drawn from the glasses' own readings
+with no phone; with it, 1b, 1d and the cache check (v9) changed on purpose, each saying why.
+ The MQTT library and the glasses' own battery are replaced by fakes and the phone is
 played by the test, so no message leaves the PC. Service workers are blocked in every browser context: a page that a
 service worker controls would fetch the real MQTT library and reach the real brokers.
 
@@ -340,7 +342,10 @@ with sync_playwright() as p:
     check("1a default display shows the glasses reading without an Android setup hint",
           "Android" not in pg.locator("body").inner_text())
     pg.evaluate("window.__setBattery(0.64, false)")
-    check("1b an unpaired display reports its own reading without a broker", pg.locator("#localLevel").inner_text() == "Glasses 64%")
+    # Changed on purpose (own history): with a real reading the default launch now draws the full screen from the
+    # glasses' own readings, so the level is the big number there, not the one line of the first local build.
+    own_level = "document.getElementById('unpaired').hidden && !document.getElementById('main').hidden && document.querySelector('#glasses .pct').textContent === '64%'"
+    check("1b an unpaired display reports its own reading without a broker", pg.evaluate(own_level))
     pg.evaluate("(key) => localStorage.setItem('bg.pair', JSON.stringify({t:'old-phone',k:key}))", KEY)
     pg.goto(f"{BASE}index.html#t=old-phone&k={KEY}")
     pg.evaluate("""() => {
@@ -350,7 +355,7 @@ with sync_playwright() as p:
     }""")
     check("1d old install and saved phone stay local on reconnect and resume",
           pg.evaluate("window.__clients.length === 0 && !key && !asked")
-          and pg.locator("#localLevel").inner_text() == "Glasses 64%")
+          and pg.evaluate(own_level))
     pg.goto(URL)
     pg.wait_for_function("window.__clients.length === 3")
     pg.goto(f"{BASE}index.html#t=old-phone&k={KEY}")
@@ -882,7 +887,7 @@ with sync_playwright() as p:
         description = "Check the battery level and charging status of your glasses."
         ok = (description in html and manifest["name"] == web_manifest["name"] == "Battery"
               and manifest["description"] == web_manifest["description"] == description
-              and "const CACHE = 'battery-glass-v8';" in sw)
+              and "const CACHE = 'battery-glass-v9';" in sw)
         check("D5 web and launcher metadata match the default glasses battery function", ok)
 
     for name, fn in [("D7 no link", case_no_link), ("D7 not enough", case_not_enough), ("D normal day", case_normal_day),
@@ -1617,6 +1622,173 @@ with sync_playwright() as p:
                      ("C young", case_c_young), ("C turns old", case_c_turns_old), ("E", case_e), ("F above", case_f_above),
                      ("G band", case_g_band), ("G voice", case_g_voice), ("G heading", case_g_heading),
                      ("G legend", case_g_legend), ("S1", case_s1), ("S2", case_s2), ("S3", case_s3), ("now dot", case_now_dot)]:
+        guarded(name, fn)
+
+    # ---- O. Own history: the statistics from the glasses' own readings, with no phone -------------------------
+    LOCAL = f"{BASE}index.html?test=1"
+    LOG = "JSON.parse(localStorage.getItem('bakar.battery.log') || '[]')"
+
+    def local_page(log=None, level=None, charging=False, ctx=None):
+        """The default launch (no Android link) with these readings already kept: [minutes ago, level, charging, app]."""
+        pg = page_at(LOCAL, ctx=ctx)
+        if log is not None:
+            pg.evaluate("""(log) => { const now = Date.now();
+                localStorage.setItem('bakar.battery.log', JSON.stringify(log.map(([ago, l, c, a]) => [Math.round(now - ago * 60000), l, c, a]))); }""", log)
+            pg.reload()
+        if level is not None:
+            pg.evaluate("([l, c]) => window.__setBattery(l, c)", [level, charging])
+        pg.wait_for_timeout(250)
+        return pg
+
+    def drain(start_ago, start, end, minutes, app="Battery", charging=0):
+        n = abs(end - start)
+        return [[start_ago - i * minutes / n, start + (i if end > start else -i), charging, app] for i in range(n + 1)]
+
+    def case_o_logger():
+        pg = local_page()
+        none = pg.evaluate(LOG)
+        pg.evaluate("window.__setBattery(0.64, false)")
+        one = pg.evaluate(LOG)
+        pg.evaluate("window.__setBattery(0.63, false); window.__setBattery(0.63, true)")
+        three = pg.evaluate(LOG)
+        close(pg)
+        phone = page_at(LOCAL, ctx=new_context("Mozilla/5.0 (iPhone; CPU iPhone OS 27_2 like Mac OS X)"))
+        phone.evaluate("window.__setBattery(0.92, true)")
+        other = phone.evaluate(LOG)
+        close(phone)
+        ok = (none == [] and len(one) == 1 and one[0][1:] == [64, 0, "Battery"] and abs(one[0][0] - time.time() * 1000) < 60000
+              and [r[1:] for r in three] == [[64, 0, "Battery"], [63, 0, "Battery"], [63, 1, "Battery"]] and other == [])
+        check("O1 a real reading is kept with its time, level, charging and app, on each change; Chromium's no-data "
+              "answer and a phone's own battery are never kept", ok, [none, one, three, other])
+
+    def case_o_bounded():
+        # 2500 readings, 300 of them over 7 days old: after the next reading, at most 2000, none older than 7 days.
+        pg = local_page([[8 * 24 * 60 + i, 50, 0, "Battery"] for i in range(300, 0, -1)]
+                        + [[2200 - i, 90 - (i % 40), 0, "Battery"] for i in range(2200)], level=0.5)
+        a = pg.evaluate(f"(() => {{ const l = {LOG}; return [l.length, Math.min(...l.map((r) => r[0])) > Date.now() - 7 * 86400000, l[l.length - 1].slice(1)]; }})()")
+        # While nothing changes the newest reading only moves on: many reads at one level stay two readings.
+        pg.evaluate("""() => { const real = Date.now; let ahead = 0; Date.now = () => real() + ahead;
+            for (let i = 0; i < 30; i++) { ahead += 4 * 60000; document.dispatchEvent(new Event('visibilitychange')); } Date.now = real; }""")
+        b = pg.evaluate(f"{LOG}.filter((r) => r[1] === 50).length")
+        close(pg)
+        check("O2 the store is bounded: 7 days, 2000 readings, and a level that holds stays two readings",
+              a[0] <= 2000 and a[1] and a[2] == [50, 0, "Battery"] and b == 2, [a, b])
+
+    def case_o_storage_fails():
+        ctx = new_context()
+        ctx.add_init_script("Storage.prototype.setItem = () => { throw new Error('full'); }; Storage.prototype.getItem = () => { throw new Error('off'); };")
+        before = len(errors)
+        pg = local_page(level=0.64, ctx=ctx)
+        v = view(pg)
+        close(pg)
+        check("O3 storage that throws breaks nothing: the level still shows and no error is raised",
+              v["glasses"] == "64%" and v["state"] == "From your glasses" and len(errors) == before, [v, errors[before:]])
+
+    def case_o_stats():
+        # An hour and a half of Battery open, 12 points an hour, up to now.
+        pg = local_page(drain(90, 90, 72, 90), level=0.72)
+        v = view(pg)
+        vis = pg.evaluate("""[getComputedStyle(document.querySelector('#band .pct')).display, getComputedStyle(document.querySelector('#band .bar')).display,
+            document.activeElement && document.activeElement.id, document.getElementById('keyBand').hidden, document.getElementById('keyGlasses').hidden]""")
+        shot(pg, "O-own-history")
+        close(pg)
+        rate = rate_of(v["rows"], "Battery open")
+        ok = (v["state"] == "From your glasses" and v["glasses"] == "72%" and rate is not None and near(rate, 12, 1)
+              and v["left"].startswith("At this pace: 20% around ") and v["leftData"].get("low") and len(path_pts(v["gPath"])) >= 18
+              and v["bandNote"] == "See it in the Meta AI app" and vis == ["none", "none", "span", True, False]
+              and "Android" not in v["state"] and v["notCounted"])
+        check("O4 with no phone the glasses' own readings give the chart, the rate for the app that was open, and when "
+              "to charge; the source is named, the band says it needs the Android phone app and draws no empty box",
+              ok, [v, vis])
+
+    def case_o_gap():
+        # 20 minutes open (90 to 87), nothing for 3 hours, then 20 minutes (86 to 83). Each spell is too short alone;
+        # joined across the gap they would be 7 points over 3 h 40 min. Nothing may be made of the gap.
+        pg = local_page(drain(220, 90, 87, 20) + drain(20, 86, 83, 20), level=0.83)
+        v = view(pg)
+        segs = v["gPath"].count("M")
+        # The second spell alone has 3 changes over 20 minutes, so "At this pace" stands, at its own 9 points an hour
+        # (83% to 20% in 7 hours); across the gap it would be under 2 an hour, over 30 hours away.
+        low_h = (int(v["leftData"].get("low", 0)) - pg.evaluate("Date.now()")) / HOUR
+        close(pg)
+        one = local_page(drain(220, 90, 87, 20) + drain(20, 86, 83, 20)[:1], level=0.86)  # a look after the gap
+        v1 = view(one)
+        close(one)
+        ok = (segs == 2 and v["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"]
+              and not v["notCounted"] and v["left"].startswith("At this pace: ") and abs(low_h - 7) < 0.75
+              and v1["left"] == "" and v1["gPath"].count("M") == 1)
+        check("O5 a gap while no app was open stays a gap: the chart breaks, no rate and no time is worked out across it",
+              ok, [segs, low_h, v["rows"], v["notCounted"], v["left"], v1["left"], v1["gPath"]])
+
+    def case_o_never_zero():
+        # 50 minutes open with no fall at all: "under 2% an hour", never 0; a jump just after it drops even that.
+        pg = local_page([[50 - 4 * i, 80, 0, "Battery"] for i in range(13)], level=0.80)
+        v = view(pg)
+        close(pg)
+        pg = local_page([[60 - 4 * i, 80, 0, "Battery"] for i in range(13)] + [[8, 70, 0, "Battery"], [4, 70, 0, "Battery"]], level=0.70)
+        v2 = view(pg)
+        close(pg)
+        ok = (len(v["rows"]) == 1 and v["rows"][0].startswith("Battery open | over ") and v["rows"][0].endswith("| under 2% an hour")
+              and v["left"] == "" and v2["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"])
+        check("O6 no fall is \"under X% an hour\", never 0, and a jump of more than 2 points counts for nothing", ok, [v, v2])
+
+    def case_o_charging():
+        pg = local_page(drain(30, 40, 60, 30, charging=1), level=0.60, charging=True)
+        v = view(pg)
+        close(pg)
+        ok = (v["glassesNote"] == "Charging" and re.match(r"^80% around \d", v["left"] or "") is not None
+              and "charging" in v["glassesCls"] and v["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"])
+        check("O7 while charging, the time for 80% comes from this charge's own readings", ok, v)
+
+    def case_o_old_level():
+        # The battery gives no reading now (Chromium's no-data answer), but readings are kept: the last one is shown,
+        # dim, dated on the top line, and no time is worked out from it.
+        pg = local_page(drain(180, 90, 80, 60))
+        v = view(pg)
+        close(pg)
+        ok = (v["glasses"] == "80%" and "old" in v["glassesCls"] and v["state"].startswith("From your glasses · level from ")
+              and v["left"] == "" and rate_of(v["rows"], "Battery open") is not None)
+        check("O8 with no level now, the last kept reading is shown dim with its time, and gives no time to charge", ok, v)
+
+    def case_o_other_app():
+        # battery-log.js included by another app: its readings carry that app's name and make their own row.
+        pg = local_page(drain(150, 95, 85, 60, app="Tidal Glass") + drain(60, 84, 78, 60), level=0.78)
+        v = view(pg)
+        pg.evaluate("""() => new Promise((done) => { const s = document.createElement('script'); s.src = 'battery-log.js';
+            s.setAttribute('data-app', 'Sound Lab'); s.onload = () => setTimeout(done, 100); document.head.append(s); })""")
+        last = pg.evaluate(f"{LOG}.pop()")
+        close(pg)
+        src = fetch("battery-log.js")
+        ok = (near(rate_of(v["rows"], "Tidal Glass open"), 10, 1) and near(rate_of(v["rows"], "Battery open"), 6, 1)
+              and last[1:] == [78, 0, "Sound Lab"] and len(src.splitlines()) < 60
+              and not re.search(r"fetch\(|XMLHttpRequest|WebSocket|sendBeacon|import |require\(", src)
+              and "'battery-log.js'" in fetch("sw.js") and '<script src="battery-log.js" data-app="Battery">' in fetch("index.html"))
+        check("O9 the logger stands alone (under 60 lines, no network, no imports), names the app that includes it, and "
+              "each app's readings make their own row", ok, [v["rows"], last])
+
+    def case_o_android_unchanged():
+        # With an Android link, readings kept on the glasses change nothing: the phone's history is what is drawn.
+        ctx = new_context()
+        pg = page_at(LOCAL, ctx=ctx)
+        pg.evaluate("""() => { const now = Date.now(); localStorage.setItem('bakar.battery.log',
+            JSON.stringify([...Array(19)].map((_, i) => [now - (90 - i * 5) * 60000, 90 - i, 0, 'Battery']))); }""")
+        pg.goto("about:blank")
+        pg.goto(URL)
+        pg.wait_for_function("window.__clients && window.__clients.length === 3")
+        pg.evaluate("window.__clients.forEach((c) => c.fire('connect'))")
+        pg.wait_for_timeout(300)
+        s = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(s), s.out)
+        v = view(pg)
+        cls = pg.evaluate("[document.getElementById('main').classList.contains('local'), getComputedStyle(document.querySelector('#band .pct')).display]")
+        close(pg)
+        ok = (v["state"].startswith("From Android") and not any("Battery open" in r for r in v["rows"]) and len(v["rows"]) >= 2
+              and v["band"] != "—" and v["bandNote"] != "See it in the Meta AI app" and cls[0] is False and cls[1] != "none")
+        check("O10 with an Android link nothing changes: the phone's readings, the band and its rows are drawn as before", ok, [v, cls])
+
+    for name, fn in [("O1", case_o_logger), ("O2", case_o_bounded), ("O3", case_o_storage_fails), ("O4", case_o_stats),
+                     ("O5", case_o_gap), ("O6", case_o_never_zero), ("O7", case_o_charging), ("O8", case_o_old_level),
+                     ("O9", case_o_other_app), ("O10", case_o_android_unchanged)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)

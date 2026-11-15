@@ -12,6 +12,9 @@
 //   on bkr/<topic>/bat. The last answer is kept on the glasses, so it shows at once next time, with its time, while the
 //   link connects. The phone's retained state (gb, gc, bb) fills in the levels until the phone answers.
 //
+// - With no Android link, the history is the glasses' own readings, kept by battery-log.js while one of the apps is
+//   open (see loadLocal); the band then has no level.
+//
 // Only what the phone can see is counted: wearing, charging, Follow my voice, which of Bakar's glasses apps is open, and
 // Tidal playing. Meta's own apps, the display's brightness and the radios are not visible to it; a dim line under the
 // list says so.
@@ -45,6 +48,9 @@ const CHARGED = 80; // while charging, a time is given up to this level only (a 
 const BAND_FRESH = 30 * MIN; // a band level read longer ago than this says how old it is
 const BAND_STALE = 45 * MIN; // a reading whose band level was read longer before it is not drawn
 const GAP = 30 * MIN; // the chart's line breaks across time the phone could not vouch for, when longer than this
+// With no Android link the readings are the glasses' own, kept by battery-log.js while one of the apps is open.
+const LOG_KEY = 'bakar.battery.log';
+const WATCH_GAP = 15 * MIN; // two of those readings further apart than this: no app was open, nothing is known between
 const $ = (id) => document.getElementById(id);
 
 let topic = null;
@@ -67,6 +73,7 @@ let heldFrom = 0; // the readings held are complete from this time on (0: none h
 let heldAll = false; // the last full answer was cut at the most one answer carries: no older readings can be had
 let heard = false; // the phone's readings are held (from an answer or the copy kept on the glasses)
 let answeredAt = 0; // this visit's last answer, by the phone's clock (0: none yet)
+let local = false; // no Android link: the readings are the glasses' own (battery-log.js)
 let own = null; // the glasses' own battery, when the browser really knows it: { level: 0-100, charging }
 let version = 0; // bumped whenever what the levels, list, time left and chart are drawn from changes
 let drawn = '';
@@ -303,6 +310,33 @@ function loadSaved() {
   } catch (e) { /* nothing usable kept */ }
 }
 
+// ---- the glasses' own readings --------------------------------------------------------------------------
+// With no Android link, the history is what battery-log.js kept on the glasses: [time, level, charging, app], written
+// only while an app that includes it is open. They are put in the phone's shape so the same rules work them out. Two
+// readings over 15 minutes apart are a gap, marked by one "not seen" entry at the earlier one's time: it ends the
+// stretch there, so no rate, no quiet time and no line is ever taken across time when nothing was reading. The app
+// that took a reading is its situation ("Battery open"): what is worn or playing is not known without the phone.
+function loadLocal() {
+  let log = [];
+  try {
+    const kept = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+    if (Array.isArray(kept)) log = kept;
+  } catch (e) { /* storage off or unreadable: no history */ }
+  const now = Date.now();
+  const out = [];
+  for (const r of log) {
+    if (!Array.isArray(r) || !(r[0] >= now - WINDOWS.week && r[0] <= now) || !(r[1] >= 0 && r[1] <= 100)) continue;
+    const prev = out[out.length - 1];
+    if (prev && r[0] < prev.at) continue;
+    if (prev && r[0] - prev.at > WATCH_GAP) out.push({ at: prev.at, g: -1, gc: '', c: false, b: -1 });
+    out.push({ at: r[0], g: Math.round(r[1]), gc: r[2] ? 'CHARGING' : 'NOT_CHARGING', w: 'DONNED', c: true, b: -1,
+      a: `app:${String(r[3] || 'App').slice(0, 24)}` });
+  }
+  history = out;
+  heard = true;
+  version++;
+}
+
 // ---- the glasses' own battery ---------------------------------------------------------------------------
 // Chromium answers "full, charging, never empties" when it has no battery data at all; that exact answer is no data
 // (as in Quran Glass; a truly full battery on its charger looks the same, and the phone's report then fills in).
@@ -365,11 +399,20 @@ const BAND_WHY = {
   'not-read-yet': 'Not read yet',
 };
 
+function placeName(s) {
+  return PLACES[s] || (s.startsWith('app:') ? `${s.slice(4)} open` : '');
+}
+
+function ifSame(s) {
+  return IF_SAME[s] || (s.startsWith('app:') ? `if ${s.slice(4)} stays open` : '');
+}
+
 // Follow my voice counts while the phone says it is listening (m); the phone ends m when Follow my voice stops. Quran
 // Glass's own "in use" lasts 4 minutes after its last message, so it is not folded in: minutes after Follow my voice
 // stopped would count as listening. Quran Glass open without Follow my voice falls under what else is going on (the
 // note under the list says it is not counted).
 function situation(r) {
+  if (typeof r.a === 'string' && r.a.startsWith('app:')) return r.a; // the glasses' own reading: the app that took it
   if (r.w === 'DOFFED') return 'notworn';
   if (r.w !== 'DONNED') return null;
   if (r.m) return 'voice';
@@ -496,7 +539,7 @@ function rows(readings) {
   const { groups } = measure(pts, drainLevel, situation);
   const out = [];
   for (const [s, o] of Object.entries(groups)) {
-    if (!PLACES[s]) continue;
+    if (!placeName(s)) continue;
     if (o.points >= ROW_POINTS && o.hours >= ROW_HOURS) {
       const rate = o.points / o.hours;
       out.push({ s, sort: rate, rate: perHour(rate), over: duration(o.hours) });
@@ -528,6 +571,10 @@ function bandRate(readings) {
 // for (now for the glasses' own reading, else the time of the phone's word).
 function glassesShown(stale) {
   if (own) return { value: own.level, charging: own.charging, old: false, at: Date.now() };
+  if (local) { // the last reading kept on the glasses, dated by the top line
+    const last = history[history.length - 1];
+    return last ? { value: last.g, charging: last.gc === 'CHARGING', old: true, at: last.at } : { value: -1, charging: false, old: false, at: 0 };
+  }
   if (phone && phone.g >= 0) return { value: phone.g, charging: phone.gc === 'CHARGING', old: stale || phone.c === false, at: phone.at };
   return { value: -1, charging: !!phone && phone.gc === 'CHARGING', old: false, at: 0 };
 }
@@ -625,6 +672,8 @@ function timeLine(G) {
   const none = { text: '' };
   if (!(G.value >= 0)) return none;
   const asOf = Math.min(G.at, Date.now());
+  // The glasses' own readings: nothing is worked out unless one was taken in the last 15 minutes (storage may be full).
+  if (local && !(history.length && Date.now() - history[history.length - 1].at <= WATCH_GAP)) return none;
   const old = Date.now() - G.at > LEVEL_FRESH;
   if (G.charging) {
     if (old || G.value >= CHARGED) return none;
@@ -649,7 +698,7 @@ function timeLine(G) {
   if (pace) return fromLastChange(G, end, pace, asOf, { lead: 'At this pace', both: true });
   const s = situation(current());
   const day = s && measure(withinDay(), drainLevel, situation).groups[s];
-  if (day && day.points >= ROW_POINTS && day.hours >= ROW_HOURS) return targets(G.value, asOf, day.points / day.hours, { condition: IF_SAME[s] });
+  if (day && day.points >= ROW_POINTS && day.hours >= ROW_HOURS) return targets(G.value, asOf, day.points / day.hours, { condition: ifSame(s) });
   return rate ? fromLastChange(G, end, rate, asOf, { lead: `At the pace ${since(end)}` }) : none;
 }
 
@@ -770,15 +819,17 @@ function phoneStale() {
 }
 
 function render() {
-  const paired = !!key;
-  setHidden($('unpaired'), paired);
-  setHidden($('main'), !paired);
-  if (!paired) {
-    const text = own ? `Glasses ${own.level}%${own.charging ? ' · charging' : ''}` : 'Glasses level unavailable.';
-    setText($('localLevel'), text);
+  // With no Android link the same screen is drawn from the glasses' own readings, once there is a level or a history.
+  const shown = !!key || (local && (!!own || history.length > 0));
+  setHidden($('unpaired'), shown);
+  setHidden($('main'), !shown);
+  $('main').classList.toggle('local', local);
+  if (!shown) {
+    setText($('localLevel'), 'Glasses level unavailable.');
     return;
   }
-  renderTop();
+  if (local) renderLocalTop();
+  else renderTop();
   const sig = `${version}|${span}|${linkUp()}|${!!asked}|${notAnswering()}`;
   if (sig === drawn) return;
   drawn = sig;
@@ -801,6 +852,12 @@ function renderTop() {
   $('main').classList.toggle('stale', !!phone && phoneStale());
 }
 
+function renderLocalTop() {
+  const last = history[history.length - 1];
+  setText($('stateText'), own || !last ? 'From your glasses' : `From your glasses · level from ${when(last.at)}`);
+  if (document.activeElement === document.body) $('span').focus();
+}
+
 function renderData() {
   const stale = phoneStale();
   const G = glassesShown(stale);
@@ -815,7 +872,8 @@ function renderData() {
   const inWindow = history.filter((r) => r.at >= Date.now() - windowMs);
   let note = '';
   const age = bandAge > BAND_FRESH; // only ever with a band level
-  if (phone && band < 0) note = BAND_WHY[phone.bw] || (heard ? 'Not read yet' : '');
+  if (local) note = 'See it in the Meta AI app';
+  else if (phone && band < 0) note = BAND_WHY[phone.bw] || (heard ? 'Not read yet' : '');
   else if (age) note = `Read ${ago(bandAge)}`;
   else if (band >= 0) note = bandRate(inWindow);
   setText($('bandNote'), note);
@@ -839,8 +897,11 @@ function renderData() {
   // Why the list is empty, said once: no link (the top line says it), the phone not heard from yet, or too little. A
   // row needs about 30 minutes of one use, added up over the span (ROW_HOURS), not 30 minutes off the charger (L).
   const list = heard ? rows(inWindow) : [];
-  renderList(list, heard ? 'Not enough readings yet: each use needs about 30 minutes in all'
+  renderList(list, local ? 'Not enough readings yet: an app needs about 30 minutes open in all'
+    : heard ? 'Not enough readings yet: each use needs about 30 minutes in all'
     : linkUp() && asked ? "Waiting for your phone's readings" : '');
+  setText($('notCounted'), local ? 'Measured only while one of your apps is open. Gaps are left out.'
+    : "Not counted: Meta's apps, brightness, and Quran Glass outside Follow my voice.");
   renderChart(inWindow, windowMs, G, bandOld);
   setText($('span'), span === 'day' ? 'Last 24 hours' : 'Last 7 days');
   setAttr($('span'), 'aria-label', span === 'day' ? 'Showing the last 24 hours. Press for 7 days' : 'Showing the last 7 days. Press for 24 hours');
@@ -880,7 +941,7 @@ function renderList(list, empty) {
   }
   for (const r of list) {
     const li = add(ul, 'li', '', '');
-    add(li, 'span', 'what', PLACES[r.s]);
+    add(li, 'span', 'what', placeName(r.s));
     add(li, 'span', 'over', `over ${r.over}`);
     add(li, 'span', 'rate', r.rate);
   }
@@ -891,13 +952,14 @@ function renderList(list, empty) {
 // only when something changes, so a long time with no reading and no jump is a level that held, and stays joined.
 // A reading alone (often the level now, after a break) is a 3 px dot: the 4 px tick drawn before read as one of the
 // band's dashes (Photographer recheck 3). Returns the line and the dots, each a path.
-function linePath(readings, valueOf, current, t0, end, xOf, yOf) {
+function linePath(readings, valueOf, current, t0, end, xOf, yOf, gap = 0) {
   const segs = [];
   let seg = null;
   let last = null;
   let unseen = false;
   const add = (at, v) => {
-    if (last && (Math.abs(v - last.v) > JUMP || (unseen && at - last.at > GAP))) seg = null;
+    // `gap`: the glasses' own readings break across any time this long (no app was open), seen or not.
+    if (last && (Math.abs(v - last.v) > JUMP || (gap ? at - last.at > gap : unseen && at - last.at > GAP))) seg = null;
     if (!seg) segs.push((seg = []));
     seg.push([xOf(at), yOf(v)]);
     last = { at, v };
@@ -914,7 +976,8 @@ function linePath(readings, valueOf, current, t0, end, xOf, yOf) {
   const dots = [];
   for (const s of segs) {
     const pts = s.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`);
-    if (pts.length === 1) dots.push(`M${pts[0]}L${pts[0]}`); // drawn by its round cap
+    // The glasses' own reading taken just now and the level now are one place: a dot, not a line of no length.
+    if (pts.length === 1 || (gap && pts.every((p) => p === pts[0]))) dots.push(`M${pts[0]}L${pts[0]}`); // drawn by its round cap
     else line.push(`M${pts.join('L')}`);
   }
   return { line: line.join(''), dots: dots.join('') };
@@ -932,7 +995,7 @@ function renderChart(readings, windowMs, G, bandOld) {
   // Each line runs to now only when the level above is news.
   const gNow = G.value >= 0 && !G.old ? G.value : null;
   const bNow = phone && phone.b >= 0 && !bandOld ? phone.b : null;
-  const g = linePath(readings, (r) => (r.c === false ? -1 : r.g), gNow, t0, end, xOf, yOf);
+  const g = linePath(readings, (r) => (r.c === false ? -1 : r.g), gNow, t0, end, xOf, yOf, local ? WATCH_GAP : 0);
   const b = linePath(readings, (r) => (r.b >= 0 && !(r.bt > 0 && r.at - r.bt > BAND_STALE) ? r.b : -1), bNow, t0, end, xOf, yOf);
   setAttr($('lineGlasses'), 'd', g.line);
   setAttr($('dotsGlasses'), 'd', g.dots);
@@ -954,7 +1017,7 @@ function renderChart(readings, windowMs, G, bandOld) {
 function schedule() {
   clearTimeout(tickTimer);
   tickTimer = 0;
-  if (!key || document.visibilityState !== 'visible') return;
+  if ((!key && !local) || document.visibilityState !== 'visible') return;
   const now = Date.now();
   const due = [];
   if (asked && now - asked <= ANSWER_WAIT) due.push(asked + ANSWER_WAIT + 20);
@@ -982,6 +1045,11 @@ function startVisit() {
 // Battery: off screen, the link closes and the timers stop. Coming back is a new visit: what the phone said before is
 // its last word until it answers again.
 function onVisibility() {
+  if (local) { // the glasses' own readings: nothing to open or close
+    refreshLocal();
+    schedule();
+    return;
+  }
   if (document.visibilityState === 'visible') startVisit();
   else {
     clearInterval(askTimer);
@@ -995,6 +1063,12 @@ function onVisibility() {
     version++;
     hideTimer = setTimeout(() => { if (document.visibilityState !== 'visible') closeLink(); }, 400);
   }
+}
+
+function refreshLocal() {
+  if (!local) return;
+  loadLocal();
+  render();
 }
 
 function wakeUp() {
@@ -1026,6 +1100,13 @@ async function main() {
   window.addEventListener('online', () => { if (key && document.visibilityState === 'visible') { closeLink(); startVisit(); } });
   if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) { /* optional */ } }
   if (key) loadSaved();
+  else {
+    local = true;
+    loadLocal();
+    window.addEventListener('batterylog', refreshLocal); // battery-log.js kept a reading
+    window.addEventListener('storage', (e) => { if (e.key === LOG_KEY) refreshLocal(); }); // or another app's page did
+    schedule();
+  }
   watchOwnBattery();
   render();
   if (key) {

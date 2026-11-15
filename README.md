@@ -32,6 +32,33 @@ nothing is connected, and up to 10 minutes for a broker that keeps failing while
 closes 400 ms after the page is hidden, and closing it clears every pending retry, so from then on nothing is tried (a
 retry already due in those 400 ms can still go out).
 
+## With no phone: the glasses' own history
+
+With no Android link (an iPhone pairing, or no phone at all) the same screen is drawn from the glasses' own readings,
+and the top line says "From your glasses".
+
+- **The readings.** `battery-log.js` keeps one whenever the glasses' browser gives a real level (Chromium's "no data"
+  answer is ignored, and only the Display's browser, Greatwhite, is ever logged): on opening, on a change of level or
+  charging, when the page is shown or hidden, and every 4 minutes while on screen. Each is `[time, level, charging,
+  app]` in `localStorage` under `bakar.battery.log`, kept 7 days, 2000 at most. While nothing changes a second reading
+  only moves forward in time, so a level that holds is two readings. If storage is full or off, nothing is kept and
+  nothing breaks.
+- **Readings are taken only while an app that includes the logger is open.** Two readings more than 15 minutes apart
+  are a gap: the chart breaks there, and no rate, no quiet time and no time to charge is worked out across it.
+- **The same rules** as below work them out: tick to tick, jumps of more than 2 points skipped, 3 points over 30
+  minutes for a row, never 0, "Not enough readings yet" until a number can stand. The situation is the app that took
+  the reading ("Battery open"); worn or not, Follow my voice and Tidal playing are not known without the phone. A time
+  to charge needs a reading from the last 15 minutes.
+- **The band** has no level without the phone: its place says "See it in the Meta AI app" and no bar is drawn.
+- **Other apps can add readings.** `localStorage` is shared by every app on this origin, so one line in a sibling
+  app's page keeps readings while that app is open, under its own name:
+
+  `<script src="/battery-glass/battery-log.js" data-app="Tidal Glass"></script>`
+
+  Until an app has that line, only the time Battery itself is open is measured.
+
+With an Android link (`#androidBridge=…`) nothing changes: the phone's readings are drawn, as before.
+
 ## How the numbers are worked out
 
 - **Tick to tick.** Levels move in whole percents, so a rate is measured from one change of the level to another,
@@ -102,9 +129,11 @@ under the list names Meta's apps, brightness and Quran Glass outside Follow my v
 The standard Battery launch reads the glasses locally. To request Android history an Android companion must supply an explicit `#androidBridge=topic~key` fragment. Legacy addresses and saved pairings stay local-only. On Meta Ray-Ban Display, a meaningful local battery reading now appears even without the
 Android companion. The verified Display browser identifies itself as Greatwhite. A normal iPhone
 or laptop browser never reports its own charge as the glasses' level. The Android link supplies
-band readings and history. With no usable sample the page says the glasses level is unavailable.
+band readings and history. With no usable sample and no readings kept, the page says the glasses level is unavailable.
 
 ## Privacy
+
+The glasses' own readings (level, charging, time, app name) stay in the glasses' browser storage and are never sent.
 
 The page code is public; nothing private is in it. The pairing (topic and AES-GCM key) reaches the glasses only in
 the app's address fragment, which never goes to a server, and every message is sealed with that key, so the public
@@ -115,7 +144,9 @@ stays in this app's own storage there.
 
 `python -m http.server 47641 --bind 127.0.0.1 --directory webapp`, then
 `python webapp/tests/battery_test.py [base_url] [shots_dir]` (set `BATTERY_TEST_VERBOSE=1` to print what each check
-saw). The test fakes the brokers and the glasses' own battery, blocks service workers (a controlled page would load the
+saw). It needs Python's `playwright` package and Chrome. Section O covers the glasses' own history (the logger,
+its bounds, storage that fails, gaps, never 0, charging, another app's name, and the Android path unchanged); with it
+1b, 1d and the cache check (v9) changed on purpose. The test fakes the brokers and the glasses' own battery, blocks service workers (a controlled page would load the
 real MQTT library), and plays the phone, so no message leaves the PC. It includes the Director's harness cases
 (B01-B05, T1-T3), which fail on 78e18cc, the first rechecks' cases (Director N11, N11r, N13; Photographer A-C), which
 fail on bccfc7c, and the Director's second recheck (R2d, R2e, R2f, R2h6 and R1 for "At this pace", H for the
