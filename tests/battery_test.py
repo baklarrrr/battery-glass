@@ -1695,7 +1695,7 @@ with sync_playwright() as p:
         rate = rate_of(v["rows"], "Battery open")
         ok = (v["state"] == "From your glasses" and v["glasses"] == "72%" and rate is not None and near(rate, 12, 1)
               and v["left"].startswith("At this pace: 20% around ") and v["leftData"].get("low") and len(path_pts(v["gPath"])) >= 18
-              and v["bandNote"] == "Needs the Android phone app" and vis == ["none", "none", "span", True, False]
+              and v["bandNote"] == "See it in the Meta AI app" and vis == ["none", "none", "span", True, False]
               and "Android" not in v["state"] and v["notCounted"])
         check("O4 with no phone the glasses' own readings give the chart, the rate for the app that was open, and when "
               "to charge; the source is named, the band says it needs the Android phone app and draws no empty box",
@@ -1783,7 +1783,7 @@ with sync_playwright() as p:
         cls = pg.evaluate("[document.getElementById('main').classList.contains('local'), getComputedStyle(document.querySelector('#band .pct')).display]")
         close(pg)
         ok = (v["state"].startswith("From Android") and not any("Battery open" in r for r in v["rows"]) and len(v["rows"]) >= 2
-              and v["band"] != "—" and v["bandNote"] != "Needs the Android phone app" and cls[0] is False and cls[1] != "none")
+              and v["band"] != "—" and v["bandNote"] != "See it in the Meta AI app" and cls[0] is False and cls[1] != "none")
         check("O10 with an Android link nothing changes: the phone's readings, the band and its rows are drawn as before", ok, [v, cls])
 
     for name, fn in [("O1", case_o_logger), ("O2", case_o_bounded), ("O3", case_o_storage_fails), ("O4", case_o_stats),

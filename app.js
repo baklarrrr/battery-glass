@@ -872,7 +872,7 @@ function renderData() {
   const inWindow = history.filter((r) => r.at >= Date.now() - windowMs);
   let note = '';
   const age = bandAge > BAND_FRESH; // only ever with a band level
-  if (local) note = 'Needs the Android phone app';
+  if (local) note = 'See it in the Meta AI app';
   else if (phone && band < 0) note = BAND_WHY[phone.bw] || (heard ? 'Not read yet' : '');
   else if (age) note = `Read ${ago(bandAge)}`;
   else if (band >= 0) note = bandRate(inWindow);

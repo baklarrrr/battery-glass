@@ -49,7 +49,7 @@ and the top line says "From your glasses".
   minutes for a row, never 0, "Not enough readings yet" until a number can stand. The situation is the app that took
   the reading ("Battery open"); worn or not, Follow my voice and Tidal playing are not known without the phone. A time
   to charge needs a reading from the last 15 minutes.
-- **The band** has no level without the phone: its place says "Needs the Android phone app" and no bar is drawn.
+- **The band** has no level without the phone: its place says "See it in the Meta AI app" and no bar is drawn.
 - **Other apps can add readings.** `localStorage` is shared by every app on this origin, so one line in a sibling
   app's page keeps readings while that app is open, under its own name:
 
