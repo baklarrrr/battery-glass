@@ -1871,7 +1871,66 @@ with sync_playwright() as p:
         check("Q3 a statistic that cannot be worked out is words, never a number; nothing is said about a day with no "
               "readings; with an Android link the block is not drawn", bool(ok), [s, y, android])
 
-    for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest)]:
+    CHART = """() => {
+      const d = (id) => document.getElementById(id).getAttribute('d') || '';
+      const boxes = [...document.querySelectorAll('.chartlabels span')].filter((e) => e.textContent && e.id !== 'xTicks')
+        .map((e) => { const r = e.getBoundingClientRect(); return [e.textContent, Math.round(r.left), Math.round(r.right)]; }).sort((a, b) => a[1] - b[1]);
+      return { charge: d('lineCharge').split('M').length - 1, unseen: d('lineUnseen').split('M').length - 1, up: d('lineUnseenUp').split('M').length - 1,
+        now: d('dotNow'), nowCls: document.getElementById('dotNow').getAttribute('class'), days: d('dayLines').split('M').length - 1,
+        labels: boxes.map((b) => b[0]), overlap: boxes.some((b, i) => i && b[1] < boxes[i - 1][2] + 2),
+        keys: [...document.querySelectorAll('.key .k')].filter((e) => !e.hidden).map((e) => e.textContent),
+        note: document.getElementById('chartNote').hidden ? '' : document.getElementById('chartNote').textContent };
+    }"""
+
+    def case_q_chart():
+        # The day of Q2. The charge seen is green; the three spells with no app open are dotted between the readings
+        # around them (none of them a rise); the level now is a dot; the axis is marked on the clock, midnight by day.
+        log = (drain(3 * 1440 + 600, 80, 70, 60) + drain(18 * 60, 60, 100, 60, charging=1) + drain(6 * 60, 98, 86, 60)
+               + drain(120, 50, 70, 40, charging=1) + drain(60, 70, 60, 60))
+        pg = fixed_page(log, level=0.60)
+        c = pg.evaluate(CHART)
+        g = view(pg)["gPath"]
+        shot(pg, "Q4-chart-day")
+        pg.keyboard.press("Enter")
+        pg.wait_for_timeout(200)
+        wk = pg.evaluate(CHART)
+        shot(pg, "Q4-chart-week")
+        close(pg)
+        # A rise while no app was open is a charge nobody read: dotted and green. A low level now is an amber dot.
+        pg = fixed_page(drain(300, 40, 30, 60) + drain(60, 25, 15, 60), level=0.15)
+        low = pg.evaluate(CHART)
+        close(pg)
+        pg = fixed_page(drain(300, 40, 30, 60) + drain(60, 80, 70, 60), level=0.70)
+        up = pg.evaluate(CHART)
+        close(pg)
+        ok = (c["charge"] >= 20 and c["unseen"] == 3 and c["up"] == 0 and c["now"] and "low" not in c["nowCls"] and c["days"] == 1
+              and g.count("M") == 4 and c["keys"] == ["Glasses", "Charging", "No app open"] and not c["overlap"]
+              and c["labels"][0] == "Mon 9:00 PM" and "6 AM" in c["labels"] and c["labels"][-1] == "now" and c["note"] == ""
+              and not wk["overlap"] and "Mon" in wk["labels"] and "Sun" in wk["labels"] and wk["days"] == 3 and wk["unseen"] == 4
+              and "low" in low["nowCls"] and low["keys"] == ["Glasses", "No app open"] and low["up"] == 0
+              and up["up"] == 1 and up["keys"] == ["Glasses", "Charging", "No app open"])
+        check("Q4 the chart reads at a glance: a charge is green, time with no app open is dotted between two real readings "
+              "(green when the level rose across it), the level now is a dot, and the axis carries clock and day marks "
+              "that never touch", ok, [c, g.count("M"), wk, low, up])
+
+    def case_q_chart_empty():
+        # Nothing in the span: the chart says so. The Android chart draws none of the marks.
+        pg = fixed_page(drain(30 * 60, 90, 80, 60))
+        c = pg.evaluate(CHART)
+        close(pg)
+        pg = page_at(URL, connect=True)
+        d = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(d), d.out)
+        a = pg.evaluate(CHART)
+        vis = pg.evaluate("[getComputedStyle(document.getElementById('xTicks')).display, getComputedStyle(document.getElementById('chartNote')).display, getComputedStyle(document.getElementById('dotNow')).display]")
+        close(pg)
+        ok = (c["note"] == "No readings in the last 24 hours" and not c["now"]
+              and a["charge"] == 0 and a["unseen"] == 0 and a["up"] == 0 and a["now"] == "" and a["keys"] == ["Glasses", "Band"]
+              and vis == ["none", "none", "none"])
+        check("Q5 an empty chart says there are no readings in the span; with an Android link none of the new marks is drawn",
+              ok, [c, a, vis])
+
+    for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest), ("Q4", case_q_chart), ("Q5", case_q_chart_empty)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)

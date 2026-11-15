@@ -1067,6 +1067,106 @@ function renderChart(readings, windowMs, G, bandOld) {
   // says when the readings start, with the day when it is not today.
   setText($('since'), readings.length && t0 > end - windowMs ? when(t0) : (span === 'day' ? '24 h ago' : '7 days ago'));
   setAttr($('chart'), 'aria-label', `Battery levels over the ${span === 'day' ? 'last 24 hours' : 'last 7 days'}`);
+  if (local) renderOwnChart(t0, end, xOf, yOf, G, gNow, w, h);
+}
+
+// What the glasses' own chart adds to the line: a charge in green, the time no app was open as a dotted line between
+// the two readings around it (green when the level rose across it: a charge nobody read), the level now as a dot,
+// and marks along the time axis. Nothing is drawn that was not read: the dotted lines only join two real readings.
+function renderOwnChart(t0, end, xOf, yOf, G, gNow, w, h) {
+  const pts = ownLog.filter((r) => r.at >= t0 && r.at <= end);
+  const P = (at, v) => `${xOf(at).toFixed(1)},${yOf(v).toFixed(1)}`;
+  let charge = '';
+  let unseen = '';
+  let unseenUp = '';
+  const join = (a, b, bothCharging) => {
+    const seg = `M${P(a.at, a.g)}L${P(b.at, b.g)}`;
+    if (b.at - a.at > WATCH_GAP || Math.abs(b.g - a.g) > JUMP) {
+      if (b.g > a.g) unseenUp += seg;
+      else unseen += seg;
+    } else if (bothCharging) charge += seg;
+  };
+  pts.forEach((r, i) => { if (i) join(pts[i - 1], r, pts[i - 1].gc === 'CHARGING' && r.gc === 'CHARGING'); });
+  const last = pts[pts.length - 1];
+  if (last && gNow != null) join(last, { at: end, g: gNow }, last.gc === 'CHARGING' && G.charging);
+  setAttr($('lineCharge'), 'd', charge);
+  setAttr($('lineUnseen'), 'd', unseen);
+  setAttr($('lineUnseenUp'), 'd', unseenUp);
+  setAttr($('dotNow'), 'd', gNow != null ? `M${P(end, gNow)}L${P(end, gNow)}` : '');
+  $('dotNow').classList.toggle('charging', !!G.charging);
+  $('dotNow').classList.toggle('low', gNow != null && gNow <= LOW && !G.charging);
+  // The legend's two extra entries exist only on this screen (the Android screen's legend is untouched).
+  for (const [id, cls, text] of [['keyCharge', 'charge', 'Charging'], ['keyUnseen', 'unseen', 'No app open']]) {
+    if ($(id)) continue;
+    const k = document.createElement('span');
+    k.id = id;
+    k.className = 'k';
+    const sw = document.createElement('span');
+    sw.className = `sw ${cls}`;
+    k.append(sw, text);
+    document.querySelector('.key').append(k);
+  }
+  setHidden($('keyCharge'), !charge && !unseenUp);
+  setHidden($('keyUnseen'), !unseen && !unseenUp);
+
+  // Marks along the time axis, on the clock: the smallest step that gives 6 or fewer (a day each over a week). A
+  // midnight is a dotted line the height of the chart, named by its day; the rest are short marks with their time.
+  const px = $('chart').getBoundingClientRect().width || 500;
+  const step = [10, 15, 30, 60, 120, 180, 360, 720].map((m) => m * MIN).find((s) => (end - t0) / s <= 6) || 24 * HOUR;
+  const d = new Date(t0);
+  d.setHours(0, 0, 0, 0);
+  let ticks = '';
+  let days = '';
+  const labels = [];
+  // Over a week the start is named only when the readings start later than the week: the days name the rest.
+  if (step >= 24 * HOUR && $('since').textContent === '7 days ago') setText($('since'), '');
+  const sinceLen = $('since').textContent.length;
+  let free = sinceLen ? sinceLen * 7.2 + 14 : 0; // px from the left already taken by the label of the start
+  const place = (x, text) => {
+    const half = text.length * 3.6;
+    const at = (x / w) * px;
+    if (at - half < free || at + half > px - 36) return; // would touch the label before it, or "now"
+    free = at + half + 10;
+    labels.push([((x / w) * 100).toFixed(2), text]);
+  };
+  for (let n = 0; n < 400; n++) {
+    const at = step >= 24 * HOUR ? new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime() : d.getTime() + n * step;
+    if (at > end) break;
+    const day = new Date(at);
+    const midnight = day.getHours() === 0 && day.getMinutes() === 0;
+    if (step >= 24 * HOUR) { // a day's name sits under the middle of what is drawn of that day
+      const next = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+      if (next > t0) place((xOf(Math.max(at, t0)) + xOf(Math.min(next, end))) / 2, day.toLocaleDateString([], { weekday: 'short' }));
+    }
+    if (at <= t0) continue;
+    const x = xOf(at);
+    if (midnight) days += `M${x.toFixed(1)},1L${x.toFixed(1)},${h}`;
+    else ticks += `M${x.toFixed(1)},${h - 6}L${x.toFixed(1)},${h}`;
+    if (step < 24 * HOUR) {
+      place(x, midnight ? day.toLocaleDateString([], { weekday: 'short' })
+        : day.toLocaleTimeString([], day.getMinutes() ? { hour: 'numeric', minute: '2-digit' } : { hour: 'numeric' }));
+    }
+  }
+  setAttr($('ticks'), 'd', ticks);
+  setAttr($('dayLines'), 'd', days);
+  const sig = JSON.stringify(labels);
+  const box = $('xTicks');
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig;
+    box.replaceChildren(...labels.map(([left, text]) => {
+      const s = document.createElement('span');
+      s.style.insetInlineStart = `${left}%`;
+      s.textContent = text;
+      return s;
+    }));
+  }
+
+  // An empty chart says why; a chart of one reading says how it fills in. It sits clear of the dot.
+  const note = !pts.length ? `No readings in the last ${span === 'day' ? '24 hours' : '7 days'}`
+    : last.at - pts[0].at < 2 * MIN ? 'The line grows while one of your apps is open' : '';
+  setText($('chartNote'), note);
+  setHidden($('chartNote'), !note);
+  $('chartNote').style.insetBlockStart = gNow != null && gNow > 50 ? '58%' : '22%';
 }
 
 // ---- visits and timers --------------------------------------------------------------------------------

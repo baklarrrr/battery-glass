@@ -99,6 +99,12 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 #main.local .chart { position: absolute; inset: 0; block-size: 100%; }
 #main.local .chartlabels { margin-inline-start: 40px; margin-block-end: 2px; }
 #main.local .yaxis { display: block; }
+#main.local .chartlabels { position: relative; font-size: 13px; }
+#main.local .xticks { display: block; position: absolute; inset: 0; }
+#main.local .xticks span { position: absolute; inset-block-start: 0; transform: translateX(-50%); white-space: nowrap; }
+#main.local .chartnote { display: block; position: absolute; inset-inline-start: 50%; transform: translateX(-50%); margin: 0; padding: 0 10px; background: #000; white-space: nowrap; font-size: 15px; color: var(--dim); }
+#main.local .key { gap: 12px; font-size: 13px; }
+#main.local .key .k { gap: 6px; }
 #main.local .chart .own { display: inline; }
 #main.local .chart .mid, #main.local .chart .axis { vector-effect: non-scaling-stroke; }
 #main.local .chart .mid { stroke-dasharray: 2 6; }
@@ -125,6 +131,19 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 .yaxis span { position: absolute; inset-inline-end: 0; transform: translateY(-50%); font-size: 13px; line-height: 1; color: var(--dim); font-variant-numeric: tabular-nums; }
 .yaxis span:first-child { transform: translateY(-15%); }
 .yaxis .lowmark { color: var(--low); opacity: 0.8; }
+.xticks, .chartnote { display: none; }
+/* The glasses' own chart: a charge is green (seen charging, solid; a rise while no app was open, dotted), time when
+   no app was open is a dim dotted line between the two readings around it, and the level now is a dot at the end. */
+.chart .line.charge { stroke: var(--accent); }
+.chart .gapline { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-dasharray: 1 5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.chart .gapline.up { stroke: var(--accent); }
+.chart .dots.now { stroke: var(--ink); stroke-width: 8; }
+.chart .dots.now.charging { stroke: var(--accent); }
+.chart .dots.now.low { stroke: var(--low); }
+.chart .ticks { fill: none; stroke: var(--dim); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart .daylines { fill: none; stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
+.sw.charge { border-block-start-color: var(--accent); }
+.sw.unseen { border-block-start: 2px dotted var(--dim); }
 .chart .top { stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 6; vector-effect: non-scaling-stroke; }
 .chart .lowline { stroke: var(--low); stroke-opacity: 0.55; stroke-width: 1; stroke-dasharray: 2 6; vector-effect: non-scaling-stroke; }
 .chart { inline-size: 100%; block-size: 80px; overflow: visible; } /* a dot at 100% is not cut at the top */
