@@ -76,6 +76,9 @@ and the top line says "From your glasses".
 - **First open.** With no level and nothing kept the screen says why and what comes next ("Your glasses are not
   giving this app their battery level right now. It shows here by itself as soon as they do."), and in a phone's or
   computer's browser that the battery is read only on the glasses.
+- **Opening never flashes.** The first drawing waits for the battery's first answer, 0.7 s at most, so neither
+  "unavailable" nor an old dim level shows before the real one. A battery that never answers leaves the kept reading,
+  dim and dated.
 - **It cannot end in a blank screen.** A kept store that is not JSON, not a list or has broken rows is started again
   clean on the next reading (real readings among them are kept). With storage off or full the readings of the visit
   are held in memory (`window.bakarBatteryLog`) and drawn. A battery the browser refuses, or a level that is not a
@@ -181,7 +184,8 @@ its bounds, storage that fails, gaps, never 0, charging, another app's name, and
 1b, 1d and the cache check (v9) changed on purpose. Section Q (15 November 2026) covers the glasses' own screen: its
 layout, the six statistics on a fixed clock, the chart's marks, the first open, the words beside the level, and what
 cannot break (a corrupt store, storage off or full, a battery that throws or gives nonsense, code that never arrives,
-drawing that throws, no network: the one check that runs with the service worker on). With it O5 to O8 changed on
+drawing that throws, no network: the one check that runs with the service worker on), an opening that does not
+flash, and a full store of 2000 readings. With it O5 to O8 changed on
 purpose for the new words, and the cache check is v10. The test fakes the brokers and the glasses' own battery, blocks service workers (a controlled page would load the
 real MQTT library), and plays the phone, so no message leaves the PC. It includes the Director's harness cases
 (B01-B05, T1-T3), which fail on 78e18cc, the first rechecks' cases (Director N11, N11r, N13; Photographer A-C), which

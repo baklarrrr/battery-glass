@@ -2159,10 +2159,53 @@ with sync_playwright() as p:
               small["up"] == 0 and small["unseen"] == 1 and small["keys"] == ["Glasses", "No app open"]
               and big["up"] == 1 and "Charging" in big["keys"], [small, big])
 
+    def case_q_no_flash():
+        # A battery that answers 300 ms after the page opens, with readings kept from an hour ago: until it answers
+        # nothing is drawn (no "unavailable", no old dim level), then the real level comes up bright, once.
+        slow = """(() => { const b = { level: 0.64, charging: false, chargingTime: Infinity, dischargingTime: 7200, addEventListener() {}, removeEventListener() {} };
+          Object.defineProperty(Navigator.prototype, 'getBattery', { configurable: true, value() { return new Promise((done) => setTimeout(() => done(b), %d)); } }); })();"""
+        seen = """() => { window.__seen = []; const look = () => { window.__seen.push([document.getElementById('unpaired').hidden, document.getElementById('main').hidden,
+          document.querySelector('#glasses .pct').textContent, document.getElementById('glasses').className.includes('old')].join()); requestAnimationFrame(look); }; look(); }"""
+        ctx = new_context()
+        pg = page_at(LOCAL, ctx=ctx)
+        pg.evaluate("""() => { const now = Date.now(); localStorage.setItem('bakar.battery.log', JSON.stringify([[now - 3600000, 70, 0, 'Battery'], [now - 3540000, 70, 0, 'Battery', 1]])); }""")
+        ctx.add_init_script(slow % 300)
+        ctx.add_init_script("document.addEventListener('DOMContentLoaded', " + seen + ")")
+        pg.reload()
+        pg.wait_for_timeout(700)
+        states = pg.evaluate("[...new Set(window.__seen)]")
+        close(pg)
+        # A battery that never answers: after the wait the kept reading is drawn, dim and dated; nothing hangs.
+        ctx = new_context()
+        ctx.add_init_script(slow % 60000)
+        pg = page_at(LOCAL, ctx=ctx)
+        pg.evaluate("""() => { const now = Date.now(); localStorage.setItem('bakar.battery.log', JSON.stringify([[now - 3600000, 70, 0, 'Battery'], [now - 3540000, 70, 0, 'Battery', 1]])); }""")
+        pg.reload()
+        pg.wait_for_timeout(1000)
+        never = [view(pg)["glasses"], "old" in view(pg)["glassesCls"], view(pg)["glassesNote"][:9]]
+        close(pg)
+        check("Q16 opening never flashes: nothing is drawn until the battery first answers (0.7 s at most), so neither "
+              "\"unavailable\" nor an old dim level shows before the real one; a battery that never answers leaves the kept reading",
+              states == ["true,true,—,false", "true,false,64%,false"] and never == ["70%", True, "Last read"], [states, never])
+
+    def case_q_full_store():
+        # The most the logger keeps: 2000 readings over 7 days. Both spans draw quickly and nothing is cut.
+        log = [[7 * 1440 - 60 - i * 5, 100 - (i % 80), 1 if i % 80 > 70 else 0, ["Battery", "Tidal Glass", "Sound Lab"][(i // 80) % 3]] for i in range(1999)]
+        pg = local_page(log, level=0.5)
+        ms = pg.evaluate("() => { const t = performance.now(); for (let i = 0; i < 4; i++) { document.getElementById('span').click(); } return (performance.now() - t) / 4; }")
+        scroll = pg.evaluate("[document.documentElement.scrollHeight, document.documentElement.scrollWidth, document.getElementById('main').scrollHeight]")
+        kept = pg.evaluate(f"{LOG}.length")
+        pg.keyboard.press("Enter")
+        pg.wait_for_timeout(200)
+        shot(pg, "Q17-full-store-week")
+        close(pg)
+        check("Q17 a full store (2000 readings over 7 days) draws either span in well under half a second, stays at 2000 "
+              "and nothing is cut", ms < 300 and scroll == [600, 600, 600] and kept == 2000, [round(ms), scroll, kept])
+
     for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest), ("Q4", case_q_chart), ("Q5", case_q_chart_empty),
                      ("Q6", case_q_first_open), ("Q7", case_q_notes), ("Q8", case_q_heals), ("Q9", case_q_storage), ("Q10", case_q_no_level),
                      ("Q11", case_q_never_blank), ("Q12", case_q_offline), ("Q13", case_q_many_apps), ("Q14", case_q_steady),
-                     ("Q15", case_q_small_rise)]:
+                     ("Q15", case_q_small_rise), ("Q16", case_q_no_flash), ("Q17", case_q_full_store)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)

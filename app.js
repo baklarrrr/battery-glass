@@ -30,6 +30,7 @@ const ASK_EVERY = 5 * MIN;
 const ANSWER_WAIT = 12000;
 const CALM_AFTER = 15000;
 const LOW = 20;
+const FIRST_WAIT = 700; // the glasses' own screen waits this long for the battery's first answer before drawing
 const VERY_LOW = 5; // the glasses' own screen says "charge now"
 const WINDOWS = { day: 24 * HOUR, week: 7 * 24 * HOUR };
 const MAX = 1500; // readings per answer
@@ -80,6 +81,7 @@ let own = null; // the glasses' own battery, when the browser really knows it: {
 let version = 0; // bumped whenever what the levels, list, time left and chart are drawn from changes
 let drawn = '';
 let listDrawn = '';
+let started = false; // the first drawing has been made (see main)
 const recent = [];
 
 // ---- pairing and crypto -------------------------------------------------------------------------
@@ -406,13 +408,14 @@ function renderStats() {
 // Chromium answers "full, charging, never empties" when it has no battery data at all; that exact answer is no data
 // (as in Quran Glass; a truly full battery on its charger looks the same, and the phone's report then fills in).
 
+// Returns a promise that settles once the battery has answered for the first time (at once when it never will).
 function watchOwnBattery() {
   // An ordinary phone or laptop tab reports its host battery, not the glasses.
-  if (!/\bGreatwhite\b/i.test(navigator.userAgent) || !navigator.getBattery) return;
+  if (!/\bGreatwhite\b/i.test(navigator.userAgent) || !navigator.getBattery) return Promise.resolve();
   let asking = null;
-  try { asking = navigator.getBattery(); } catch (e) { return; } // a browser that refuses: the level is unavailable
-  if (!asking || typeof asking.then !== 'function') return;
-  asking.then((b) => {
+  try { asking = navigator.getBattery(); } catch (e) { return Promise.resolve(); } // a browser that refuses: the level is unavailable
+  if (!asking || typeof asking.then !== 'function') return Promise.resolve();
+  return asking.then((b) => {
     const read = () => {
       const unknown = b.level === 1 && b.charging && b.chargingTime === 0 && b.dischargingTime === Infinity;
       // A level that is not a number from 0 to 1 is no reading: it is never shown.
@@ -901,6 +904,7 @@ function phoneStale() {
 // Nothing may end in a blank screen. If drawing ever throws, the screen says so in plain words, with the level when the
 // glasses give one, and the next change tries the whole drawing again.
 function render() {
+  if (!started) return; // the first drawing is main's
   try {
     draw();
   } catch (e) {
@@ -1331,7 +1335,12 @@ async function main() {
     window.addEventListener('storage', (e) => { if (e.key === LOG_KEY) refreshLocal(); }); // or another app's page did
     schedule();
   }
-  watchOwnBattery();
+  // With an Android link the screen is drawn at once, as before. With the glasses' own readings the first drawing
+  // waits for the battery's first answer (0.7 s at most), so an open never flashes "unavailable" or an old dim level
+  // before the real one.
+  const first = watchOwnBattery();
+  if (local) await Promise.race([first, new Promise((done) => setTimeout(done, FIRST_WAIT))]);
+  started = true;
   render();
   if (key) {
     $('span').focus();
