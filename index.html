@@ -20,6 +20,8 @@
     <section id="unpaired" class="screen center" hidden>
       <h1>Battery</h1>
       <p id="localLevel" class="say" aria-live="polite">Glasses level unavailable.</p>
+      <p id="localWhy" class="why"></p>
+      <p id="localNext" class="why"></p>
     </section>
 
     <section id="main" class="screen" aria-label="Battery" hidden>
@@ -43,6 +45,7 @@
       </div>
 
       <p id="left" class="left"></p>
+      <p id="leftHint" class="left hint" hidden></p>
 
       <dl id="stats" class="stats" hidden>
         <div><dt>Used today</dt><dd id="statUsed"></dd></div>

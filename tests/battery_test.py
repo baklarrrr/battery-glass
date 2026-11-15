@@ -1628,6 +1628,10 @@ with sync_playwright() as p:
     LOCAL = f"{BASE}index.html?test=1"
     LOG = "JSON.parse(localStorage.getItem('bakar.battery.log') || '[]')"
 
+    # Changed on purpose (round 4, 15 November 2026): the empty list's line was "Not enough readings yet: an app needs
+    # about 30 minutes open in all"; under the heading "How fast they drain" it now reads plainly.
+    NO_RATE = "Shows after about 30 minutes with one app open"
+
     def local_page(log=None, level=None, charging=False, ctx=None):
         """The default launch (no Android link) with these readings already kept: [minutes ago, level, charging, app]."""
         pg = page_at(LOCAL, ctx=ctx)
@@ -1714,7 +1718,7 @@ with sync_playwright() as p:
         one = local_page(drain(220, 90, 87, 20) + drain(20, 86, 83, 20)[:1], level=0.86)  # a look after the gap
         v1 = view(one)
         close(one)
-        ok = (segs == 2 and v["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"]
+        ok = (segs == 2 and v["rows"] == [NO_RATE]
               and not v["notCounted"] and v["left"].startswith("At this pace: ") and abs(low_h - 7) < 0.75
               and v1["left"] == "" and v1["gPath"].count("M") == 1)
         check("O5 a gap while no app was open stays a gap: the chart breaks, no rate and no time is worked out across it",
@@ -1729,7 +1733,7 @@ with sync_playwright() as p:
         v2 = view(pg)
         close(pg)
         ok = (len(v["rows"]) == 1 and v["rows"][0].startswith("Battery open | over ") and v["rows"][0].endswith("| under 2% an hour")
-              and v["left"] == "" and v2["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"])
+              and v["left"] == "" and v2["rows"] == [NO_RATE])
         check("O6 no fall is \"under X% an hour\", never 0, and a jump of more than 2 points counts for nothing", ok, [v, v2])
 
     def case_o_charging():
@@ -1737,7 +1741,7 @@ with sync_playwright() as p:
         v = view(pg)
         close(pg)
         ok = (v["glassesNote"] == "Charging" and re.match(r"^80% around \d", v["left"] or "") is not None
-              and "charging" in v["glassesCls"] and v["rows"] == ["Not enough readings yet: an app needs about 30 minutes open in all"])
+              and "charging" in v["glassesCls"] and v["rows"] == [NO_RATE])
         check("O7 while charging, the time for 80% comes from this charge's own readings", ok, v)
 
     def case_o_old_level():
@@ -1746,7 +1750,10 @@ with sync_playwright() as p:
         pg = local_page(drain(180, 90, 80, 60))
         v = view(pg)
         close(pg)
-        ok = (v["glasses"] == "80%" and "old" in v["glassesCls"] and v["state"].startswith("From your glasses · level from ")
+        # Changed on purpose (round 4): the date was on the top line ("From your glasses · level from 9:06 AM"), where
+        # it was cut short beside the band's line; it now sits beside the dim number it dates.
+        ok = (v["glasses"] == "80%" and "old" in v["glassesCls"] and v["state"] == "From your glasses"
+              and re.match(r"^Last read \d", v["glassesNote"])
               and v["left"] == "" and rate_of(v["rows"], "Battery open") is not None)
         check("O8 with no level now, the last kept reading is shown dim with its time, and gives no time to charge", ok, v)
 
@@ -1930,7 +1937,54 @@ with sync_playwright() as p:
         check("Q5 an empty chart says there are no readings in the span; with an Android link none of the new marks is drawn",
               ok, [c, a, vis])
 
-    for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest), ("Q4", case_q_chart), ("Q5", case_q_chart_empty)]:
+    def case_q_first_open():
+        # No level and nothing kept: the screen says why and what happens next, on the glasses and off them; a real
+        # reading then draws the full screen with no reload.
+        pg = local_page()
+        g = pg.evaluate("[document.getElementById('localLevel').textContent, document.getElementById('localWhy').textContent, document.getElementById('localNext').textContent]")
+        fits = pg.evaluate("document.getElementById('unpaired').scrollHeight <= 600 && document.documentElement.scrollWidth <= 600")
+        pg.evaluate("window.__setBattery(0.64, false)")
+        pg.wait_for_timeout(250)
+        v = view(pg)
+        c = pg.evaluate(CHART)
+        hint = pg.evaluate("[document.getElementById('leftHint').hidden, document.getElementById('leftHint').textContent, document.getElementById('leftHint').getBoundingClientRect().height]")
+        close(pg)
+        phone = page_at(LOCAL, ctx=new_context("Mozilla/5.0 (iPhone; CPU iPhone OS 27_2 like Mac OS X)"))
+        phone.evaluate("window.__setBattery(0.92, true)")
+        ph = phone.evaluate("[document.getElementById('localLevel').textContent, document.getElementById('localWhy').textContent, document.getElementById('main').hidden]")
+        close(phone)
+        ok = (g[0] == "Glasses level unavailable." and "as soon as they do" in g[1] and "Meta AI app" in g[2] and fits
+              and v["glasses"] == "64%" and v["glassesNote"] == "On battery" and v["rows"] == [NO_RATE] and v["left"] == ""
+              and hint == [False, "When to charge shows once the level has moved a few times", 24]
+              and c["note"] == "The line grows while one of your apps is open" and c["now"]
+              and ph[0] == "Glasses level unavailable." and "only on the glasses" in ph[1] and ph[2] is True)
+        check("Q6 the first open is never two bare lines: with no level it says why and what comes next (on the glasses, "
+              "and in a phone's browser); with a first level every empty part says what it is waiting for", ok, [g, fits, v, c, hint, ph])
+
+    def case_q_notes():
+        def note(log, level=None, charging=False):
+            pg = local_page(log, level=level, charging=charging)
+            v = view(pg)
+            hint = pg.evaluate("document.getElementById('leftHint').hidden ? '' : document.getElementById('leftHint').textContent")
+            close(pg)
+            return [v["glasses"], v["glassesNote"], v["glassesCls"], v["left"], hint]
+        full = note([[20, 100, 0, "Battery"], [2, 100, 0, "Battery"]], level=1.0)
+        low = note(drain(60, 30, 18, 60), level=0.18)
+        very = note(drain(60, 15, 4, 60), level=0.04)
+        past = note(drain(30, 70, 90, 30, charging=1), level=0.90, charging=True)
+        # The last reading kept was charging, three hours ago, and there is no level now: nothing says "Charging".
+        was = note(drain(240, 40, 60, 30, charging=1))
+        ok = (full[:2] == ["100%", "Full"] and full[4] == ""
+              and low[1] == "Low: charge soon" and "low" in low[2] and low[3].startswith("At this pace: empty around ")
+              and very[1] == "Very low: charge now" and "low" in very[2]
+              and past[1] == "Charging" and past[3] == "" and past[4] == "Past 80%: the charge slows from here, so no time is given"
+              and was[0] == "60%" and re.match(r"^Last read \d", was[1]) and "charging" not in was[2] and "old" in was[2]
+              and was[4] == "The glasses are not giving a level right now")
+        check("Q7 beside the level: Full at 100%, Low and Very low with what to do, an old reading with its time and never "
+              "as charging now; where no time can be worked out the line says why, with no number", bool(ok), [full, low, very, past, was])
+
+    for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest), ("Q4", case_q_chart), ("Q5", case_q_chart_empty),
+                     ("Q6", case_q_first_open), ("Q7", case_q_notes)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)

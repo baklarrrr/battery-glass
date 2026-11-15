@@ -41,6 +41,10 @@ main { block-size: 100%; }
 h1 { margin: 0; font-size: 34px; font-weight: 600; }
 h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); letter-spacing: 0.02em; }
 .say { margin: 0; font-size: 22px; }
+/* Under "Glasses level unavailable.": why, and what happens next, so the first screen is never two bare lines. */
+.why { margin: 0; max-inline-size: 500px; font-size: 18px; line-height: 1.4; color: var(--soft); }
+.why:empty { display: none; }
+#localNext { color: var(--dim); }
 
 /* ---- top line ------------------------------------------------------------------------------------ */
 .topline { display: flex; align-items: center; min-block-size: 22px; font-size: 15px; color: var(--dim); }
@@ -110,6 +114,8 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 #main.local .chart .mid { stroke-dasharray: 2 6; }
 
 .left { margin: 0; font-size: 18px; color: var(--soft); min-block-size: 24px; }
+/* In the time line's place when no time can be worked out from the glasses' own readings: why, in dim words. */
+.left.hint { font-size: 16px; line-height: 24px; color: var(--dim); white-space: nowrap; }
 
 /* ---- how fast they drain ------------------------------------------------------------------------------
    One line per situation, so all six and the "Not counted" line fit: what, how long it was measured, the rate. The

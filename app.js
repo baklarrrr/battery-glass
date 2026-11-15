@@ -30,6 +30,7 @@ const ASK_EVERY = 5 * MIN;
 const ANSWER_WAIT = 12000;
 const CALM_AFTER = 15000;
 const LOW = 20;
+const VERY_LOW = 5; // the glasses' own screen says "charge now"
 const WINDOWS = { day: 24 * HOUR, week: 7 * 24 * HOUR };
 const MAX = 1500; // readings per answer
 const FRESH = 5 * MIN; // a state message older than this is not news from the phone
@@ -630,7 +631,8 @@ function glassesShown(stale) {
   if (own) return { value: own.level, charging: own.charging, old: false, at: Date.now() };
   if (local) { // the last reading kept on the glasses, dated by the top line
     const last = history[history.length - 1];
-    return last ? { value: last.g, charging: last.gc === 'CHARGING', old: true, at: last.at } : { value: -1, charging: false, old: false, at: 0 };
+    // Whether they are charging now is not known from an old reading, so it is not said.
+    return last ? { value: last.g, charging: false, old: true, at: last.at } : { value: -1, charging: false, old: false, at: 0 };
   }
   if (phone && phone.g >= 0) return { value: phone.g, charging: phone.gc === 'CHARGING', old: stale || phone.c === false, at: phone.at };
   return { value: -1, charging: !!phone && phone.gc === 'CHARGING', old: false, at: 0 };
@@ -759,6 +761,15 @@ function timeLine(G) {
   return rate ? fromLastChange(G, end, rate, asOf, { lead: `At the pace ${since(end)}` }) : none;
 }
 
+// Why the glasses' own readings give no time yet. Never a number: only what is missing.
+function ownHint(G) {
+  if (!(G.value >= 0)) return '';
+  if (G.old) return 'The glasses are not giving a level right now';
+  if (G.charging) return G.value >= CHARGED ? `Past ${CHARGED}%: the charge slows from here, so no time is given` : `Time to ${CHARGED}% shows after a few minutes on charge`;
+  if (G.value >= 100) return '';
+  return 'When to charge shows once the level has moved a few times';
+}
+
 // From the stretch's last change the level falls at this rate. A change overdue at `asOf` (when the level shown was
 // vouched for) means it falls slower now, so it is taken as just about to change then; the level shown, when it is
 // lower than the stretch's last change (the glasses' own reading, or the phone's word after the readings), starts then.
@@ -883,6 +894,12 @@ function render() {
   $('main').classList.toggle('local', local);
   if (!shown) {
     setText($('localLevel'), 'Glasses level unavailable.');
+    // Why, and what happens next. Only the Display's own browser can read the glasses' battery.
+    const glasses = /\bGreatwhite\b/i.test(navigator.userAgent);
+    setText($('localWhy'), glasses ? 'Your glasses are not giving this app their battery level right now. It shows here by itself as soon as they do.'
+      : 'This page reads the battery only on the glasses themselves. Open Battery there.');
+    setText($('localNext'), glasses ? 'Then come the level, a chart, today\'s use and how fast they drain. Until then the level is in the Meta AI app on your phone.'
+      : 'A phone or computer never shows its own battery here as the glasses\'.');
     return;
   }
   if (local) renderLocalTop();
@@ -911,7 +928,8 @@ function renderTop() {
 
 function renderLocalTop() {
   const last = history[history.length - 1];
-  setText($('stateText'), own || !last ? 'From your glasses' : `From your glasses · level from ${when(last.at)}`);
+  // An old level is dated beside its number ("Last read 9:06 AM"), where it is read, not up here.
+  setText($('stateText'), 'From your glasses');
   if (document.activeElement === document.body) $('span').focus();
 }
 
@@ -924,7 +942,8 @@ function renderData() {
   const bandOld = band >= 0 && (stale || bandAge > BAND_FRESH);
   level($('band'), band, false, bandOld);
   // The glasses' own readings: beside the number, what the glasses are doing. With an Android link, as before.
-  setText($('glassesNote'), G.charging ? 'Charging' : local && G.value >= 0 ? (G.old ? 'Last reading kept' : 'On battery') : '');
+  setText($('glassesNote'), !local ? (G.charging ? 'Charging' : '') : !(G.value >= 0) ? '' : G.old ? `Last read ${when(G.at)}`
+    : G.charging ? 'Charging' : G.value >= 100 ? 'Full' : G.value <= VERY_LOW ? 'Very low: charge now' : G.value <= LOW ? 'Low: charge soon' : 'On battery');
 
   const windowMs = WINDOWS[span];
   const inWindow = history.filter((r) => r.at >= Date.now() - windowMs);
@@ -947,6 +966,11 @@ function renderData() {
   setAttr(left, 'data-low', t.low ? String(Math.round(t.low)) : null);
   setAttr(left, 'data-empty', t.empty ? String(Math.round(t.empty)) : null);
   setAttr(left, 'data-charged', t.charged ? String(Math.round(t.charged)) : null);
+  // The glasses' own screen says why there is no time, in the time's place, so the row is never a blank.
+  const hint = local && !t.text ? ownHint(G) : '';
+  setText($('leftHint'), hint);
+  setHidden($('leftHint'), !hint);
+  setHidden(left, !!hint);
   // A time worked out from the phone's level goes when that level turns 30 minutes old, even with nothing else new.
   clearTimeout(levelTimer);
   const due = G.at + LEVEL_FRESH - Date.now();
@@ -955,7 +979,7 @@ function renderData() {
   // Why the list is empty, said once: no link (the top line says it), the phone not heard from yet, or too little. A
   // row needs about 30 minutes of one use, added up over the span (ROW_HOURS), not 30 minutes off the charger (L).
   const list = heard ? rows(inWindow) : [];
-  renderList(list, local ? 'Not enough readings yet: an app needs about 30 minutes open in all'
+  renderList(list, local ? 'Shows after about 30 minutes with one app open'
     : heard ? 'Not enough readings yet: each use needs about 30 minutes in all'
     : linkUp() && asked ? "Waiting for your phone's readings" : '');
   renderStats();
