@@ -1813,7 +1813,65 @@ with sync_playwright() as p:
         check("Q1 the glasses' own screen has no dead middle: the chart fills the height left, marked 100%, 50% and 20%; "
               "the band's line clears the top line; the Android screen is laid out as before", ok, [plot, state, band, pct, marks, fits, android])
 
-    for name, fn in [("Q1", case_q_layout)]:
+    # A fixed clock for what depends on the day: Tuesday 10 November 2026, 3:00 PM in Toronto.
+    TUE_3PM = 1794340800000
+
+    def fixed_page(log, level=None, charging=False, at=TUE_3PM, url=None):
+        """The default launch at a fixed time, with these readings kept: [minutes before that time, level, charging, app]."""
+        ctx = new_context()
+        ctx.clock.set_fixed_time(at / 1000)
+        pg = page_at(url or LOCAL, ctx=ctx)
+        pg.evaluate("""([log, at]) => localStorage.setItem('bakar.battery.log',
+            JSON.stringify(log.map(([ago, l, c, a]) => [Math.round(at - ago * 60000), l, c, a])))""", [log, at])
+        pg.reload()
+        if level is not None:
+            pg.evaluate("([l, c]) => window.__setBattery(l, c)", [level, charging])
+        pg.wait_for_timeout(250)
+        return pg
+
+    STATS = "Object.fromEntries([...document.querySelectorAll('#stats dd')].map((e) => [e.id.slice(4), e.textContent + (e.classList.contains('none') ? ' (none)' : '')]))"
+
+    def case_q_stats():
+        # Monday evening a charge to 100%. Tuesday: 9 to 10 AM from 98% to 86%; nothing until a charge seen from 1:00
+        # to 1:40 PM, 50% to 70%; then 2 to 3 PM from 70% to 60%, up to now.
+        log = (drain(18 * 60, 60, 100, 60, charging=1) + drain(6 * 60, 98, 86, 60) + drain(120, 50, 70, 40, charging=1)
+               + drain(60, 70, 60, 60))
+        pg = fixed_page(log, level=0.60)
+        s = pg.evaluate(STATS)
+        shown = pg.evaluate("!document.getElementById('stats').hidden")
+        fits = pg.evaluate("[...document.querySelectorAll('#stats dd, #stats dt')].every((e) => e.scrollWidth <= e.clientWidth + 1)")
+        shot(pg, "Q2-statistics")
+        close(pg)
+        week = re.match(r"^(\d+)% an hour$", s.get("Week", ""))
+        ok = (shown and fits and s["Used"] == "at least 58%" and s["Low"] == "50% at 1:00 PM" and s["Charge"] == "40 min"
+              and s["Full"] == "Mon 10:00 PM" and week and abs(int(week.group(1)) - 11) <= 1 and s["Seen"] == "2 h 40 min")
+        check("Q2 statistics from the glasses' own readings: used today (a floor when part of the day was not read), the "
+              "lowest level today and when, time seen on charge, the last reading at 100%, the week's average, and how "
+              "long readings ran today", bool(ok), [s, shown, fits])
+
+    def case_q_stats_honest():
+        # One reading, just now: nothing can be worked out, and every value says so in words, never a number.
+        pg = fixed_page([[0, 64, 0, "Battery"]], level=0.64)
+        s = pg.evaluate(STATS)
+        close(pg)
+        # Readings from yesterday only: nothing is said about today.
+        pg = fixed_page(drain(26 * 60, 90, 80, 60))
+        y = pg.evaluate(STATS)
+        close(pg)
+        # With an Android link the statistics block is not drawn at all.
+        pg = page_at(URL, connect=True)
+        d = normal_day(pg.evaluate("Date.now()"))
+        answer(pg, now_of(d), d.out)
+        android = pg.evaluate("document.getElementById('stats').hidden")
+        close(pg)
+        ok = (s == {"Used": "Nothing yet (none)", "Low": "64% at 3:00 PM", "Charge": "None seen (none)", "Full": "Not seen this week (none)",
+                    "Week": "Not enough yet (none)", "Seen": "Under a minute (none)"}
+              and y["Used"] == "No readings yet (none)" and y["Low"] == "No readings yet (none)" and y["Seen"] == "Under a minute (none)"
+              and re.match(r"^\d+% an hour$", y["Week"]) and android)
+        check("Q3 a statistic that cannot be worked out is words, never a number; nothing is said about a day with no "
+              "readings; with an Android link the block is not drawn", bool(ok), [s, y, android])
+
+    for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)

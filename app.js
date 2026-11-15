@@ -74,6 +74,7 @@ let heldAll = false; // the last full answer was cut at the most one answer carr
 let heard = false; // the phone's readings are held (from an answer or the copy kept on the glasses)
 let answeredAt = 0; // this visit's last answer, by the phone's clock (0: none yet)
 let local = false; // no Android link: the readings are the glasses' own (battery-log.js)
+let ownLog = []; // those readings alone, oldest first, in the phone's shape (see loadLocal)
 let own = null; // the glasses' own battery, when the browser really knows it: { level: 0-100, charging }
 let version = 0; // bumped whenever what the levels, list, time left and chart are drawn from changes
 let drawn = '';
@@ -333,8 +334,64 @@ function loadLocal() {
       a: `app:${String(r[3] || 'App').slice(0, 24)}` });
   }
   history = out;
+  ownLog = out.filter((r) => r.g >= 0);
   heard = true;
   version++;
+}
+
+// What the glasses' own readings say about today and the week. Each is a fact of the readings kept, and where they
+// cannot say, the value is words (`none`), never a number:
+// - used: every fall between one reading and the next since midnight, added up. Time when no app was open can hide
+//   a charge, so with such a gap today it is a floor: "at least".
+// - lowest: the lowest level read today, and when it was first read.
+// - on charge: time between two readings under 15 minutes apart that were both charging, so only charging an app saw.
+// - last full: the last reading at 100% in the 7 days kept.
+// - average: the week's fall over the week's measured time, by the same rules as a row of the list (tick to tick, 3
+//   points over 30 minutes at least).
+// - measured: how long readings ran today (two under 15 minutes apart), which says how much the rest stands on.
+function ownStats() {
+  const now = Date.now();
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const today = ownLog.filter((r) => r.at >= midnight.getTime());
+  let used = 0;
+  let floor = today.length > 0 && today[0].at - midnight.getTime() > WATCH_GAP;
+  let charge = 0;
+  let seen = 0;
+  let low = null;
+  today.forEach((r, i) => {
+    if (!low || r.g < low.g) low = r;
+    const a = today[i - 1];
+    if (!a) return;
+    if (r.g < a.g) used += a.g - r.g;
+    if (r.at - a.at > WATCH_GAP) floor = true;
+    else {
+      seen += r.at - a.at;
+      if (a.gc === 'CHARGING' && r.gc === 'CHARGING') charge += r.at - a.at;
+    }
+  });
+  let full = 0;
+  for (const r of ownLog) if (r.g === 100) full = r.at;
+  const all = measure(history, drainLevel, () => 'all').groups.all;
+  const say = (text, none = false) => ({ text, none });
+  return {
+    used: !today.length ? say('No readings yet', true) : !used ? say('Nothing yet', true) : say(floor ? `at least ${used}%` : `${used}%`),
+    low: low ? say(`${low.g}% at ${clock(low.at)}`) : say('No readings yet', true),
+    charge: charge >= MIN ? say(duration(charge / HOUR)) : say('None seen', true),
+    full: full ? say(when(full)) : say('Not seen this week', true),
+    week: all && all.points >= ROW_POINTS && all.hours >= ROW_HOURS ? say(perHour(all.points / all.hours)) : say('Not enough yet', true),
+    seen: seen >= MIN ? say(duration(seen / HOUR)) : say('Under a minute', true),
+  };
+}
+
+function renderStats() {
+  setHidden($('stats'), !local);
+  if (!local) return;
+  const s = ownStats();
+  for (const [id, v] of [['statUsed', s.used], ['statLow', s.low], ['statCharge', s.charge], ['statFull', s.full], ['statWeek', s.week], ['statSeen', s.seen]]) {
+    setText($(id), v.text);
+    $(id).classList.toggle('none', v.none);
+  }
 }
 
 // ---- the glasses' own battery ---------------------------------------------------------------------------
@@ -901,7 +958,8 @@ function renderData() {
   renderList(list, local ? 'Not enough readings yet: an app needs about 30 minutes open in all'
     : heard ? 'Not enough readings yet: each use needs about 30 minutes in all'
     : linkUp() && asked ? "Waiting for your phone's readings" : '');
-  setText($('notCounted'), local ? 'Measured only while one of your apps is open. Gaps are left out.'
+  renderStats();
+  setText($('notCounted'), local ? 'Only while one of your apps is open'
     : "Not counted: Meta's apps, brightness, and Quran Glass outside Follow my voice.");
   renderChart(inWindow, windowMs, G, bandOld);
   setText($('span'), span === 'day' ? 'Last 24 hours' : 'Last 7 days');
