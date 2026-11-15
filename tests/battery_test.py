@@ -1,5 +1,8 @@
 """Battery (glasses app) tests. Section O (own history) covers the statistics drawn from the glasses' own readings
-with no phone; with it, 1b, 1d and the cache check (v9) changed on purpose, each saying why.
+with no phone; with it, 1b, 1d and the cache check (v9, now v10 with section Q) changed on purpose, each saying why.
+Section Q (the rounds of 15 November 2026) covers the glasses' own screen: its layout, statistics, chart, first open,
+and what cannot break (corrupt, full or missing storage, a battery that gives nonsense, code that never arrives, no
+network). With it O5-O8 changed on purpose for the new words, each saying why.
  The MQTT library and the glasses' own battery are replaced by fakes and the phone is
 played by the test, so no message leaves the PC. Service workers are blocked in every browser context: a page that a
 service worker controls would fetch the real MQTT library and reach the real brokers.
@@ -887,7 +890,7 @@ with sync_playwright() as p:
         description = "Check the battery level and charging status of your glasses."
         ok = (description in html and manifest["name"] == web_manifest["name"] == "Battery"
               and manifest["description"] == web_manifest["description"] == description
-              and "const CACHE = 'battery-glass-v9';" in sw)
+              and "const CACHE = 'battery-glass-v10';" in sw)
         check("D5 web and launcher metadata match the default glasses battery function", ok)
 
     for name, fn in [("D7 no link", case_no_link), ("D7 not enough", case_not_enough), ("D normal day", case_normal_day),
@@ -1839,10 +1842,10 @@ with sync_playwright() as p:
     STATS = "Object.fromEntries([...document.querySelectorAll('#stats dd')].map((e) => [e.id.slice(4), e.textContent + (e.classList.contains('none') ? ' (none)' : '')]))"
 
     def case_q_stats():
-        # Monday evening a charge to 100%. Tuesday: 9 to 10 AM from 98% to 86%; nothing until a charge seen from 1:00
+        # Monday evening a charge that reached 100% at 10:00 PM and was still read at 100% at 10:08. Tuesday: 9 to 10 AM from 98% to 86%; nothing until a charge seen from 1:00
         # to 1:40 PM, 50% to 70%; then 2 to 3 PM from 70% to 60%, up to now.
-        log = (drain(18 * 60, 60, 100, 60, charging=1) + drain(6 * 60, 98, 86, 60) + drain(120, 50, 70, 40, charging=1)
-               + drain(60, 70, 60, 60))
+        log = (drain(18 * 60, 60, 100, 60, charging=1) + [[17 * 60 - 4, 100, 1, "Battery"], [17 * 60 - 8, 100, 0, "Battery"]]
+               + drain(6 * 60, 98, 86, 60) + drain(120, 50, 70, 40, charging=1) + drain(60, 70, 60, 60))
         pg = fixed_page(log, level=0.60)
         s = pg.evaluate(STATS)
         shown = pg.evaluate("!document.getElementById('stats').hidden")
@@ -1913,7 +1916,7 @@ with sync_playwright() as p:
         ok = (c["charge"] >= 20 and c["unseen"] == 3 and c["up"] == 0 and c["now"] and "low" not in c["nowCls"] and c["days"] == 1
               and g.count("M") == 4 and c["keys"] == ["Glasses", "Charging", "No app open"] and not c["overlap"]
               and c["labels"][0] == "Mon 9:00 PM" and "6 AM" in c["labels"] and c["labels"][-1] == "now" and c["note"] == ""
-              and not wk["overlap"] and "Mon" in wk["labels"] and "Sun" in wk["labels"] and wk["days"] == 3 and wk["unseen"] == 4
+              and not wk["overlap"] and wk["labels"] == ["Sat", "Sun", "Mon", "Tue", "now"] and wk["days"] == 3 and wk["unseen"] == 4
               and "low" in low["nowCls"] and low["keys"] == ["Glasses", "No app open"] and low["up"] == 0
               and up["up"] == 1 and up["keys"] == ["Glasses", "Charging", "No app open"])
         check("Q4 the chart reads at a glance: a charge is green, time with no app open is dotted between two real readings "

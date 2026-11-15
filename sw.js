@@ -4,7 +4,7 @@
 // Network first, so an update shows up on the very next launch; the copy is only the fallback.
 // Only this site's own files are handled; the phone link (MQTT over WebSocket) and artwork always go
 // to the network.
-const CACHE = 'battery-glass-v9';
+const CACHE = 'battery-glass-v10';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'battery-log.js', 'vendor/mqtt.min.js', 'icon.svg', 'icon-mono.svg',
   'manifest.webmanifest', '.well-known/meta-wearables-manifest.json', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 

@@ -352,7 +352,7 @@ function loadLocal() {
 //   a charge, so with such a gap today it is a floor: "at least".
 // - lowest: the lowest level read today, and when it was first read.
 // - on charge: time between two readings under 15 minutes apart that were both charging, so only charging an app saw.
-// - last full: the last reading at 100% in the 7 days kept.
+// - last full: when the last run of readings at 100% began, in the 7 days kept.
 // - average: the week's fall over the week's measured time, by the same rules as a row of the list (tick to tick, 3
 //   points over 30 minutes at least).
 // - measured: how long readings ran today (two under 15 minutes apart), which says how much the rest stands on.
@@ -377,8 +377,9 @@ function ownStats() {
       if (a.gc === 'CHARGING' && r.gc === 'CHARGING') charge += r.at - a.at;
     }
   });
+  // The last full charge: when the last run of readings at 100% began (not its newest reading, which moves with now).
   let full = 0;
-  for (const r of ownLog) if (r.g === 100) full = r.at;
+  ownLog.forEach((r, i) => { if (r.g === 100 && !(i && ownLog[i - 1].g === 100)) full = r.at; });
   const all = measure(history, drainLevel, () => 'all').groups.all;
   const say = (text, none = false) => ({ text, none });
   return {
@@ -1181,14 +1182,14 @@ function renderOwnChart(t0, end, xOf, yOf, G, gNow, w, h) {
   let ticks = '';
   let days = '';
   const labels = [];
-  // Over a week the start is named only when the readings start later than the week: the days name the rest.
-  if (step >= 24 * HOUR && $('since').textContent === '7 days ago') setText($('since'), '');
+  // Over days the start is not named: each day drawn carries its name, and a start label hid the first of them.
+  if (step >= 24 * HOUR) setText($('since'), '');
   const sinceLen = $('since').textContent.length;
   let free = sinceLen ? sinceLen * 7.8 + 14 : 0; // px from the left already taken by the label of the start
   const place = (x, text) => {
     const half = text.length * 3.9;
     const at = (x / w) * px;
-    if (at - half < free || at + half > px - 36) return; // would touch the label before it, or "now"
+    if (at - half < free || at + half > px - 32) return; // would touch the label before it, or "now"
     free = at + half + 10;
     labels.push([((x / w) * 100).toFixed(2), text]);
   };

@@ -137,7 +137,6 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 .yaxis, .chart .own { display: none; }
 .yaxis { position: absolute; inset-block: 0; inset-inline-start: -40px; inline-size: 34px; }
 .yaxis span { position: absolute; inset-inline-end: 0; transform: translateY(-50%); font-size: 14px; line-height: 1; color: var(--dim); font-variant-numeric: tabular-nums; }
-.yaxis span:first-child { transform: translateY(-15%); }
 .yaxis .lowmark { color: var(--low); opacity: 0.8; }
 .xticks, .chartnote { display: none; }
 /* The glasses' own chart: a charge is green (seen charging, solid; a rise while no app was open, dotted), time when
