@@ -1011,12 +1011,14 @@ function renderData() {
 
   // Why the list is empty, said once: no link (the top line says it), the phone not heard from yet, or too little. A
   // row needs about 30 minutes of one use, added up over the span (ROW_HOURS), not 30 minutes off the charger (L).
-  const list = heard ? rows(inWindow) : [];
+  // The glasses' own list is always the week kept, so the button under the chart changes the chart only and nothing
+  // above it moves.
+  const list = heard ? rows(local ? history : inWindow) : [];
   renderList(list, local ? 'Shows after about 30 minutes with one app open'
     : heard ? 'Not enough readings yet: each use needs about 30 minutes in all'
     : linkUp() && asked ? "Waiting for your phone's readings" : '');
   renderStats();
-  setText($('notCounted'), local ? 'Only while one of your apps is open'
+  setText($('notCounted'), local ? 'This week, while an app is open'
     : "Not counted: Meta's apps, brightness, and Quran Glass outside Follow my voice.");
   renderChart(inWindow, windowMs, G, bandOld);
   setText($('span'), span === 'day' ? 'Last 24 hours' : 'Last 7 days');
@@ -1055,12 +1057,15 @@ function renderList(list, empty) {
     if (empty) add(ul, 'li', 'empty', empty);
     return;
   }
+  // The glasses' own screen keeps room for its chart: the three fastest get a row, the rest share one line.
+  const more = local && list.length > 3 ? list.splice(3) : [];
   for (const r of list) {
     const li = add(ul, 'li', '', '');
     add(li, 'span', 'what', placeName(r.s));
     add(li, 'span', 'over', `over ${r.over}`);
     add(li, 'span', 'rate', r.rate);
   }
+  if (more.length) add(ul, 'li', 'more', `Also: ${more.map((r) => `${placeName(r.s).replace(/ open$/, '')} ${r.rate.replace(' an hour', '')}`).join(', ')} an hour`);
 }
 
 // One line per device; it breaks where the readings stop being continuous: a level unknown or without the glasses for
@@ -1139,7 +1144,8 @@ function renderOwnChart(t0, end, xOf, yOf, G, gNow, w, h) {
   const join = (a, b, bothCharging) => {
     const seg = `M${P(a.at, a.g)}L${P(b.at, b.g)}`;
     if (b.at - a.at > WATCH_GAP || Math.abs(b.g - a.g) > JUMP) {
-      if (b.g > a.g) unseenUp += seg;
+      // A rise of a point or two across time nobody read is not called a charge (a rested battery reads higher).
+      if (b.g > a.g + JUMP) unseenUp += seg;
       else unseen += seg;
     } else if (bothCharging) charge += seg;
   };
@@ -1178,9 +1184,9 @@ function renderOwnChart(t0, end, xOf, yOf, G, gNow, w, h) {
   // Over a week the start is named only when the readings start later than the week: the days name the rest.
   if (step >= 24 * HOUR && $('since').textContent === '7 days ago') setText($('since'), '');
   const sinceLen = $('since').textContent.length;
-  let free = sinceLen ? sinceLen * 7.2 + 14 : 0; // px from the left already taken by the label of the start
+  let free = sinceLen ? sinceLen * 7.8 + 14 : 0; // px from the left already taken by the label of the start
   const place = (x, text) => {
-    const half = text.length * 3.6;
+    const half = text.length * 3.9;
     const at = (x / w) * px;
     if (at - half < free || at + half > px - 36) return; // would touch the label before it, or "now"
     free = at + half + 10;

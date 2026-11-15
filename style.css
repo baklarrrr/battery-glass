@@ -83,7 +83,7 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 #main.local #band .name::after { content: ":"; }
 #main.local .state { max-inline-size: 310px; }
 #main.local #glasses { grid-template-columns: auto 1fr; grid-template-areas: "pct name" "pct note" "bar bar"; column-gap: 16px; row-gap: 0; align-items: center; }
-#main.local #glasses .pct { grid-area: pct; font-size: 64px; }
+#main.local #glasses .pct { grid-area: pct; font-size: 64px; min-inline-size: 3.55ch; } /* "8%" to "88%": what is beside it stays put */
 #main.local #glasses .name { grid-area: name; align-self: end; font-size: 15px; color: var(--dim); }
 #main.local #glasses .note { grid-area: note; align-self: start; font-size: 19px; line-height: 26px; min-block-size: 26px; color: var(--soft); }
 #main.local #glasses.charging .note { color: var(--accent); }
@@ -91,23 +91,24 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 #main.local #glasses .bar { grid-area: bar; block-size: 8px; border-radius: 4px; margin-block-start: 10px; }
 #main.local .uses { flex: 0 0 auto; display: grid; grid-template-columns: auto 1fr; align-items: baseline; }
 #main.local .uses .list { grid-column: 1 / -1; grid-row: 2; }
-#main.local .uses .aside { grid-column: 2; grid-row: 1; margin: 0 0 6px; text-align: end; font-size: 13px; }
+#main.local .uses .aside { grid-column: 2; grid-row: 1; margin: 0 0 6px; text-align: end; font-size: 14px; }
 /* What the readings say about today and the week: six small facts, each a dim label over its value. A value that
    cannot be worked out yet is words, dim, never a number. */
 .stats { display: grid; grid-template-columns: 1fr 1.15fr 1fr; column-gap: 14px; row-gap: 8px; margin: 0; }
-.stats dt { font-size: 13px; line-height: 16px; color: var(--dim); white-space: nowrap; }
-.stats dd { margin: 0; font-size: 17px; line-height: 22px; font-weight: 600; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stats dt { font-size: 14px; line-height: 17px; color: var(--dim); white-space: nowrap; }
+.stats dd { margin: 0; font-size: 17px; line-height: 22px; font-weight: 600; color: var(--soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .stats dd.none { font-weight: 400; color: var(--dim); }
 #main.local .foot { flex: 1; min-block-size: 0; display: flex; flex-direction: column; gap: 6px; }
 #main.local .plot { flex: 1; min-block-size: 64px; position: relative; margin-inline-start: 40px; }
 #main.local .chart { position: absolute; inset: 0; block-size: 100%; }
 #main.local .chartlabels { margin-inline-start: 40px; margin-block-end: 2px; }
 #main.local .yaxis { display: block; }
-#main.local .chartlabels { position: relative; font-size: 13px; }
+#main.local .chartlabels { position: relative; font-size: 14px; }
 #main.local .xticks { display: block; position: absolute; inset: 0; }
 #main.local .xticks span { position: absolute; inset-block-start: 0; transform: translateX(-50%); white-space: nowrap; }
 #main.local .chartnote { display: block; position: absolute; inset-inline-start: 50%; transform: translateX(-50%); margin: 0; padding: 0 10px; background: #000; white-space: nowrap; font-size: 15px; color: var(--dim); }
-#main.local .key { gap: 12px; font-size: 13px; }
+#main.local .key { gap: 12px; font-size: 14px; }
+#main.local button { min-inline-size: 142px; } /* "Last 24 hours" and "Last 7 days": one width */
 #main.local .key .k { gap: 6px; }
 #main.local .chart .own { display: inline; }
 #main.local .chart .mid, #main.local .chart .axis { vector-effect: non-scaling-stroke; }
@@ -127,6 +128,7 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 .list .over { font-size: 14px; color: var(--dim); white-space: nowrap; text-align: end; }
 .list .rate { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: end; }
 .list .empty { display: block; color: var(--dim); }
+.list .more { display: block; font-size: 14px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aside { margin: 8px 0 0; font-size: 14px; line-height: 1.3; color: var(--dim); }
 
 /* ---- chart and the one control ----------------------------------------------------------------------- */
@@ -134,7 +136,7 @@ h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--dim); lett
 .plot { display: grid; }
 .yaxis, .chart .own { display: none; }
 .yaxis { position: absolute; inset-block: 0; inset-inline-start: -40px; inline-size: 34px; }
-.yaxis span { position: absolute; inset-inline-end: 0; transform: translateY(-50%); font-size: 13px; line-height: 1; color: var(--dim); font-variant-numeric: tabular-nums; }
+.yaxis span { position: absolute; inset-inline-end: 0; transform: translateY(-50%); font-size: 14px; line-height: 1; color: var(--dim); font-variant-numeric: tabular-nums; }
 .yaxis span:first-child { transform: translateY(-15%); }
 .yaxis .lowmark { color: var(--low); opacity: 0.8; }
 .xticks, .chartnote { display: none; }
@@ -189,6 +191,7 @@ button:focus-visible, button:focus { border-color: var(--ink); }
    white (Photographer recheck 3, S2). The two levels, a low level, the warning and a top line dating the phone's last
    word never dim (S1); the focus ring rests: still white and thin, dimmer, never a glow. The first input wakes it. */
 body.calm #main:not(.stale) .state:not(.warn), body.calm .list .what, body.calm .list .rate, body.calm .chart,
+body.calm .stats dd:not(.none),
 body.calm .key .sw { opacity: 0.55; }
 body.calm button { border-color: rgba(255, 255, 255, 0.16); color: var(--dim); }
 body.calm button:focus, body.calm button:focus-visible { border-color: rgba(255, 255, 255, 0.5); }

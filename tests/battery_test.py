@@ -2103,9 +2103,63 @@ with sync_playwright() as p:
         check("Q12 the app opens with no network, from the copy the service worker keeps, and still reads and keeps the level",
               v["glasses"] == "63%" and v["state"] == "From your glasses" and styled == "rgb(0, 0, 0)" and started, [v, styled, started])
 
+    def case_q_many_apps():
+        # Six apps with a rate each, one with the longest name the logger keeps (24 letters): the three fastest get a
+        # row, the rest share one line, and the chart and the button keep their room. Nothing is cut or scrolls.
+        log = (drain(700, 99, 79, 75, app="Tidal Glass") + drain(600, 78, 68, 67, app="Quran Glass") + drain(500, 67, 47, 60, app="Sound Lab")
+               + drain(400, 46, 32, 60, app="Bakar Studio Director XL") + drain(300, 31, 24, 60, app="Bakar Home") + drain(100, 23, 9, 70))
+        pg = local_page(log, level=0.09)
+        v = view(pg)
+        boxes = {s: pg.evaluate(BOX, s) for s in ("#span", ".plot", "#usesGlasses", "#stats")}
+        clipped = pg.evaluate("[...document.querySelectorAll('#main *')].filter((e) => e.clientWidth && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== 'visible').map((e) => e.id || e.className)")
+        scroll = pg.evaluate("[document.documentElement.scrollHeight, document.documentElement.scrollWidth, document.getElementById('main').scrollHeight]")
+        shot(pg, "Q13-six-apps")
+        close(pg)
+        ok = (len(v["rows"]) == 4 and v["rows"][0].startswith("Sound Lab open") and v["rows"][2].startswith("Bakar Studio Director XL open")
+              and v["rows"][3].startswith("Also: Battery ") and "Quran Glass" in v["rows"][3] and v["rows"][3].endswith("% an hour")
+              and boxes["#span"][3] <= 600 - 20 and boxes[".plot"][3] - boxes[".plot"][1] >= 64 and boxes[".plot"][1] >= boxes["#usesGlasses"][3]
+              and clipped == [] and scroll == [600, 600, 600])
+        check("Q13 with six apps the three fastest get a row and the rest share one line; the chart and the button keep "
+              "their room and nothing is cut", ok, [v["rows"], boxes, clipped, scroll])
+
+    def case_q_steady():
+        # Pressing the button changes the chart only: a rate measured three days ago is listed in both spans, and
+        # nothing above the chart moves. What is beside the level stays put from 9% to 64%.
+        pg = fixed_page(drain(3 * 1440 + 600, 80, 60, 60, app="Tidal Glass") + drain(90, 90, 72, 90), level=0.72)
+        parts = ("#stats", ".uses", ".plot", "#span", "#glassesNote")
+        day = [view(pg)["rows"], [pg.evaluate(BOX, s) for s in parts], pg.evaluate("document.getElementById('since').textContent")]
+        pg.keyboard.press("Enter")
+        pg.wait_for_timeout(200)
+        week = [view(pg)["rows"], [pg.evaluate(BOX, s) for s in parts], pg.evaluate("document.getElementById('since').textContent")]
+        focus = pg.evaluate("[document.activeElement.id, getComputedStyle(document.getElementById('span')).borderTopColor]")
+        pg.evaluate("__setBattery(0.09, false)")
+        pg.wait_for_timeout(150)
+        nine = pg.evaluate(BOX, "#glassesNote")[0]
+        # Calm: the statistics rest with the list; the level never does.
+        pg.evaluate("lastInputAt = Date.now() - 20000; checkCalm(); render();")
+        calm = pg.evaluate("[__eff('#statLow'), __eff('#statFull'), __eff('#glasses .pct'), __eff('#usesGlasses .rate')]")
+        close(pg)
+        ok = (day[0] == week[0] and len(day[0]) == 2 and day[1] == week[1] and day[2] != week[2]
+              and focus == ["span", WHITE] and nine == day[1][4][0] and calm == [0.55, 1, 1, 0.55])
+        check("Q14 nothing jumps: the button changes the chart only (the list is the week kept), what is beside the level "
+              "stays put, the button keeps a white ring, and in calm the statistics rest with the list", ok, [day, week, focus, nine, calm])
+
+    def case_q_small_rise():
+        # A level two points higher after time nobody read is not called a charge; five points higher is.
+        pg = local_page(drain(120, 60, 55, 30) + drain(30, 57, 54, 30), level=0.54)
+        small = pg.evaluate(CHART)
+        close(pg)
+        pg = local_page(drain(120, 60, 55, 30) + drain(30, 60, 57, 30), level=0.57)
+        big = pg.evaluate(CHART)
+        close(pg)
+        check("Q15 a rise of a point or two across time nobody read is not drawn or named as a charge",
+              small["up"] == 0 and small["unseen"] == 1 and small["keys"] == ["Glasses", "No app open"]
+              and big["up"] == 1 and "Charging" in big["keys"], [small, big])
+
     for name, fn in [("Q1", case_q_layout), ("Q2", case_q_stats), ("Q3", case_q_stats_honest), ("Q4", case_q_chart), ("Q5", case_q_chart_empty),
                      ("Q6", case_q_first_open), ("Q7", case_q_notes), ("Q8", case_q_heals), ("Q9", case_q_storage), ("Q10", case_q_no_level),
-                     ("Q11", case_q_never_blank), ("Q12", case_q_offline)]:
+                     ("Q11", case_q_never_blank), ("Q12", case_q_offline), ("Q13", case_q_many_apps), ("Q14", case_q_steady),
+                     ("Q15", case_q_small_rise)]:
         guarded(name, fn)
 
     check("A the time-left line never wraps onto a second line, in any case above", not wraps, wraps)
